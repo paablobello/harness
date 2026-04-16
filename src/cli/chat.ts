@@ -12,6 +12,8 @@ import {
   buildAdapter,
   buildPolicy,
   buildRegistry,
+  buildSensors,
+  composeSystemPrompt,
   permissionMode,
   terminalAsk,
 } from "./shared.js";
@@ -22,6 +24,7 @@ type ChatOptions = {
   system: string;
   permissionMode?: string;
   noTools?: boolean;
+  noSensors?: boolean;
 };
 
 export function chatCommand(): Command {
@@ -30,32 +33,36 @@ export function chatCommand(): Command {
     .option("-m, --model <model>", "Model name", "claude-sonnet-4-5")
     .option("-p, --provider <provider>", "Provider (anthropic|openai)", "anthropic")
     .option("-s, --system <prompt>", "System prompt", "You are a helpful coding assistant.")
-    .option(
-      "--permission-mode <mode>",
-      "default | accept-edits | bypass | plan",
-      "default",
-    )
+    .option("--permission-mode <mode>", "default | accept-edits | bypass | plan", "default")
     .option("--no-tools", "Disable built-in tools")
+    .option("--no-sensors", "Disable built-in typecheck/lint/test sensors")
     .action(async (rawOpts: ChatOptions) => {
       const adapter = buildAdapter(rawOpts);
+      const cwd = process.cwd();
+      const system = await composeSystemPrompt(rawOpts.system, cwd);
       const runId = randomUUID();
-      const logPath = join(process.cwd(), ".harness", "runs", runId, "events.jsonl");
+      const logPath = join(cwd, ".harness", "runs", runId, "events.jsonl");
       const sink = await FileEventSink.open(logPath);
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
       const tools = rawOpts.noTools ? undefined : buildRegistry();
-      const policy = tools ? buildPolicy(permissionMode(rawOpts.permissionMode), terminalAsk(rl)) : undefined;
+      const policy = tools
+        ? buildPolicy(permissionMode(rawOpts.permissionMode), terminalAsk(rl))
+        : undefined;
+      const sensors = rawOpts.noSensors ? undefined : buildSensors();
 
       printBanner(adapter, logPath, Boolean(tools));
 
       let assistantStarted = false;
       const summary = await runSession({
         adapter,
-        system: rawOpts.system,
-        cwd: process.cwd(),
+        system,
+        cwd,
+        runId,
         sink,
         ...(tools ? { tools } : {}),
         ...(policy ? { policy } : {}),
+        ...(sensors ? { sensors } : {}),
         input: {
           async next() {
             try {
@@ -85,11 +92,15 @@ export function chatCommand(): Command {
           const preview = res.output.split("\n")[0]?.slice(0, 120) ?? "";
           console.log(pc.dim(`  ← [${tag}] ${preview}`));
         },
+        onSensorRun: (res) => {
+          const tag = res.ok ? pc.green("ok") : pc.red("fail");
+          const preview = res.message.split("\n")[0]?.slice(0, 120) ?? "";
+          console.log(pc.dim(`  ∴ sensor ${res.name} [${tag}] ${preview}`));
+        },
       });
       rl.close();
 
-      const cost =
-        summary.totalCostUsd > 0 ? `$${summary.totalCostUsd.toFixed(4)}` : "n/a";
+      const cost = summary.totalCostUsd > 0 ? `$${summary.totalCostUsd.toFixed(4)}` : "n/a";
       console.log(
         pc.dim(
           `\n[session] turns=${summary.turns} tokens=${summary.totalInputTokens}→${summary.totalOutputTokens} cost≈${cost}`,

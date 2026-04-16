@@ -89,7 +89,7 @@ user      cli           session         adapter         tool          sensor
 
 The key bit is `pendingReminders`. Sensors don't get to interrupt the loop
 mid-turn; they queue feedback that gets prepended as a user message at the
-start of the *next* model call. This keeps the conversation transcript well-
+start of the _next_ model call. This keeps the conversation transcript well-
 formed (every assistant turn is followed by tool results, then a fresh user
 turn, never sensor noise spliced in the middle).
 
@@ -98,20 +98,21 @@ turn, never sensor noise spliced in the middle).
 The agent's prompt isn't one string — it's a stack of layers, each owned by a
 different part of the system:
 
-| Layer        | Owner                            | Lifetime          |
-|--------------|----------------------------------|-------------------|
-| `instruction`| `cfg.system`                     | per session       |
-| `project`    | `AGENTS.md` resolved at PreToolUse| per file path    |
-| `tools`      | `ToolRegistry.specs()`           | per session       |
-| `state`      | run id, cwd, permission mode     | per session       |
-| `query`      | `messages[]` (rolling)           | grows per turn    |
-| `memory`     | sensor feedback + hook system msgs| consumed next turn|
+| Layer         | Owner                                       | Lifetime           |
+| ------------- | ------------------------------------------- | ------------------ |
+| `instruction` | `cfg.system`                                | per session        |
+| `project`     | `AGENTS.md` / `CLAUDE.md` loaded by the CLI | per session        |
+| `tools`       | `ToolRegistry.specs()`                      | per session        |
+| `state`       | run id, cwd, permission mode                | per session        |
+| `query`       | `messages[]` (rolling)                      | grows per turn     |
+| `memory`      | sensor feedback + hook system msgs          | consumed next turn |
 
 This separation matters because each layer evolves on its own clock.
-`AGENTS.md` is re-resolved per tool call so a nested override can take effect
-without restarting the session. Sensor feedback is one-shot: once injected, it
-becomes part of `query` and is never re-sent. Tool specs are computed once per
-session — adding a tool mid-session would require rebuilding them.
+The CLI stitches `AGENTS.md` / `CLAUDE.md` from the workspace root to the
+session cwd into a `<project-guide>` block before the first model turn. Sensor
+feedback is one-shot: once injected, it becomes part of `query` and is never
+re-sent. Tool specs are computed once per session — adding a tool mid-session
+would require rebuilding them.
 
 ## Sensors: computational vs inferential
 
@@ -122,7 +123,7 @@ type Sensor = {
   name: string;
   kind: "computational" | "inferential";
   trigger: "after_tool" | "after_turn" | "final";
-  applicable?(ctx): Promise<boolean>;   // skip if config absent
+  applicable?(ctx): Promise<boolean>; // skip if config absent
   run(ctx): Promise<{ ok: boolean; message: string }>;
 };
 ```
@@ -135,6 +136,7 @@ type Sensor = {
   this repo because they'd spike cost on every run.
 
 The triggers are deliberately coarse:
+
 - `after_tool` — runs after each tool result. Useful for fast checks like
   `tsc` on the touched file.
 - `after_turn` — runs after the assistant says something without calling a
@@ -147,9 +149,11 @@ sensor can't fail the session.
 ## Policy: matchers and modes
 
 ```ts
-type PolicyRule =
-  | { match: { tool: string | RegExp; pattern?: RegExp };
-      decision: "allow" | "deny" | "ask"; reason?: string };
+type PolicyRule = {
+  match: { tool: string | RegExp; pattern?: RegExp };
+  decision: "allow" | "deny" | "ask";
+  reason?: string;
+};
 ```
 
 Rules are evaluated in order; first match wins. The pattern is matched against
@@ -158,12 +162,12 @@ else it's `JSON.stringify(input)`).
 
 Permission modes globally override the rule decisions:
 
-| Mode               | Behavior                                              |
-|--------------------|-------------------------------------------------------|
-| `default`          | Rules apply. `ask` prompts the user (CLI: y/N).       |
-| `acceptEdits`      | `ask` is auto-allowed for write-class tools.          |
-| `bypassPermissions`| Everything except explicit `deny` is allowed.         |
-| `plan`             | Writes/executes are short-circuited to "planned".     |
+| Mode                | Behavior                                          |
+| ------------------- | ------------------------------------------------- |
+| `default`           | Rules apply. `ask` prompts the user (CLI: y/N).   |
+| `acceptEdits`       | `ask` is auto-allowed for write-class tools.      |
+| `bypassPermissions` | Everything except explicit `deny` is allowed.     |
+| `plan`              | Writes/executes are short-circuited to "planned". |
 
 A `deny` is sticky — `bypassPermissions` won't bypass it. That's the
 denylist's whole purpose.

@@ -53,10 +53,7 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): ModelAdap
         let inputTokens = 0;
         let outputTokens = 0;
         let stopReason: StopReason = "end_turn";
-        const toolBlocks = new Map<
-          number,
-          { id: string; name: string; jsonParts: string[] }
-        >();
+        const toolBlocks = new Map<number, { id: string; name: string; jsonParts: string[] }>();
 
         for await (const chunk of stream) {
           switch (chunk.type) {
@@ -130,9 +127,7 @@ type AnthropicContentBlockParam =
   | Anthropic.Messages.ToolResultBlockParam
   | Anthropic.Messages.ImageBlockParam;
 
-function toAnthropicMessages(
-  msgs: ConversationMessage[],
-): Anthropic.Messages.MessageParam[] {
+function toAnthropicMessages(msgs: ConversationMessage[]): Anthropic.Messages.MessageParam[] {
   const out: Anthropic.Messages.MessageParam[] = [];
   for (const m of msgs) {
     if (m.role === "user") {

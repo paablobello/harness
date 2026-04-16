@@ -38,10 +38,7 @@ describe("run_command", () => {
   });
 
   it("times out and flags timed_out", async () => {
-    const r = await runCommandTool.run(
-      { command: "sleep 2", timeout_ms: 100 },
-      ctx(),
-    );
+    const r = await runCommandTool.run({ command: "sleep 2", timeout_ms: 100 }, ctx());
     expect(r.ok).toBe(false);
     expect(r.output).toContain("timed_out=true");
   }, 10_000);

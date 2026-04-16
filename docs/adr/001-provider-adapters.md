@@ -37,7 +37,7 @@ type ModelEvent =
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; input: unknown }
   | { type: "usage"; inputTokens: number; outputTokens: number; costUsd?: number }
-  | { type: "stop"; reason: "end_turn"|"max_tokens"|"tool_use"|"error"; error?: string };
+  | { type: "stop"; reason: "end_turn" | "max_tokens" | "tool_use" | "error"; error?: string };
 ```
 
 The adapter's job is to translate the provider's stream into `ModelEvent`s and
@@ -47,6 +47,7 @@ provider-specific message arrays) lives in the adapter too, kept private.
 ## Consequences
 
 **Good**:
+
 - Adding a provider is one file (~150 LOC) with a known shape.
 - The session loop has no `if (provider === "anthropic")` branches.
 - Tests use a `createScriptedAdapter([events])` fixture — full provider
@@ -54,6 +55,7 @@ provider-specific message arrays) lives in the adapter too, kept private.
 - We can vendor / strip a provider SDK without touching the loop.
 
 **Bad / accepted**:
+
 - Provider features that don't fit `ModelEvent` (parallel tool calls,
   Anthropic's "thinking" blocks, OpenAI's reasoning tokens) need either an
   extension to the union or are silently flattened. We chose flatten-by-default

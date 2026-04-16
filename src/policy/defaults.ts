@@ -26,7 +26,8 @@ export const defaultPolicy: PolicyRule[] = [
   {
     match: {
       tool: "run_command",
-      pattern: /^\s*(git\s+(status|diff|log|show)|ls\b|pwd\b|cat\b|node\b|npm\s+test|pnpm\s+(test|typecheck|lint)|vitest\b)/,
+      pattern:
+        /^\s*(git\s+(status|diff|log|show)|ls\b|pwd\b|cat\b|node\b|npm\s+test|pnpm\s+(test|typecheck|lint)|vitest\b)/,
     },
     decision: "ask",
   },

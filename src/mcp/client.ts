@@ -41,10 +41,7 @@ export class McpHub {
       ...(spec.env ? { env: spec.env } : {}),
       ...(spec.cwd ? { cwd: spec.cwd } : {}),
     });
-    const client = new Client(
-      { name: "harness-lab", version: "0.1.0" },
-      { capabilities: {} },
-    );
+    const client = new Client({ name: "harness-lab", version: "0.1.0" }, { capabilities: {} });
     await client.connect(transport);
     this.connected.push({ spec, client, transport });
 

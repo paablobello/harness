@@ -19,7 +19,7 @@ export async function resolveWithinWorkspace(
   const abs = isAbsolute(input) ? input : resolve(root, input);
   const resolved = await realpathOrParent(abs);
   const rel = relative(root, resolved);
-  if (rel === "" ) return resolved;
+  if (rel === "") return resolved;
   if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Path escapes workspace root: ${input}`);
   }

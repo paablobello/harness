@@ -23,7 +23,7 @@ observable enough to debug.
 
 This repo is my attempt to build that harness from first principles: small,
 legible, no framework magic, every primitive explicit. It's a portfolio piece
-meant to demonstrate that I understand *why* Claude Code, Codex CLI, and their
+meant to demonstrate that I understand _why_ Claude Code, Codex CLI, and their
 peers are shaped the way they are — not to replace them.
 
 ## Harness engineering
@@ -33,11 +33,11 @@ discipline of giving an LLM enough **guides** (instructions, examples, policy)
 and **sensors** (signals from the environment) that it can do useful work
 without supervision. The interesting design choices live at three layers:
 
-| Layer       | What it does                                                 | In this repo                              |
-|-------------|--------------------------------------------------------------|-------------------------------------------|
-| **Guides**  | feedforward — what the agent is told before it acts          | `system` prompt + `AGENTS.md` + policy rules + hook system messages |
+| Layer       | What it does                                                 | In this repo                                                                     |
+| ----------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| **Guides**  | feedforward — what the agent is told before it acts          | `system` prompt + `AGENTS.md` + policy rules + hook system messages              |
 | **Sensors** | feedback — what the environment tells the agent after acting | `src/sensors/` — typecheck, lint, test (computational); llm-review (inferential) |
-| **Loop**    | how guides and sensors compose across turns                  | `src/runtime/session.ts` — the only file you really need to read |
+| **Loop**    | how guides and sensors compose across turns                  | `src/runtime/session.ts` — the only file you really need to read                 |
 
 Sensor results are injected as `<sensor-feedback>` user messages on the next
 turn, so the agent sees its own typecheck failures and can fix them without
@@ -72,7 +72,7 @@ Full sequence diagrams and design notes live in
   ([ADR-001](docs/adr/001-provider-adapters.md))
 - **Tool registry** — read/list/grep/edit/apply-patch/run-command, plus a
   `subagent` tool for context isolation. Each tool declares a zod input schema
-  + a risk label (`read`/`write`/`execute`).
+  and a risk label (`read`/`write`/`execute`).
 - **Policy engine** — `{tool, pattern}` matchers → `allow|deny|ask`, with the
   same permission modes Claude Code uses (`default`, `acceptEdits`, `bypass`,
   `plan`). Sticky allow per `tool::input` so the user isn't asked twice.

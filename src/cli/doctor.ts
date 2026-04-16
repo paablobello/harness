@@ -22,9 +22,7 @@ export function doctorCommand(): Command {
       checks.push(await checkWritable(cwd));
 
       const requiredFails = checks.filter((c) => c.required && !c.ok);
-      const anyApiKey = checks.some(
-        (c) => c.name.endsWith("_API_KEY") && c.ok,
-      );
+      const anyApiKey = checks.some((c) => c.name.endsWith("_API_KEY") && c.ok);
 
       for (const c of checks) {
         const tag = c.ok ? pc.green("ok  ") : c.required ? pc.red("FAIL") : pc.yellow("warn");

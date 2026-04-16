@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { defaultPolicy } from "../../src/policy/defaults.js";
 import { PolicyEngine } from "../../src/policy/engine.js";
-import { MemoryEventSink } from "../../src/runtime/events.js";
+import { FileEventSink, MemoryEventSink } from "../../src/runtime/events.js";
 import { runSession } from "../../src/runtime/session.js";
 import { createBuiltinRegistry } from "../../src/tools/builtin.js";
 import { createScriptedAdapter, queuedInput } from "../fixtures/fake-adapter.js";
@@ -159,13 +159,69 @@ describe("runSession subagent flow", () => {
       );
       // One ToolResult per subagent call: the child's call resolves to
       // "Unknown tool" because subagent was filtered out of its registry.
-      const childCall = subagentResults.find(
-        (e) => "tool_use_id" in e && e.tool_use_id === "c1",
-      );
+      const childCall = subagentResults.find((e) => "tool_use_id" in e && e.tool_use_id === "c1");
       expect(childCall && "ok" in childCall && childCall.ok).toBe(false);
-      expect(childCall && "output" in childCall && childCall.output).toMatch(
-        /Unknown tool/,
-      );
+      expect(childCall && "output" in childCall && childCall.output).toMatch(/Unknown tool/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a shared FileEventSink open while a subagent runs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-sub-file-"));
+    try {
+      const runId = "run-fixed";
+      const logPath = join(root, ".harness", "runs", runId, "events.jsonl");
+      const sink = await FileEventSink.open(logPath);
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({
+        rules: defaultPolicy,
+        mode: "bypassPermissions",
+      });
+
+      const adapter = createScriptedAdapter([
+        [
+          {
+            type: "tool_call",
+            id: "call-sub",
+            name: "subagent",
+            input: { description: "child", prompt: "summarize" },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "child done" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+        [
+          { type: "text_delta", text: "parent done" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "parent",
+        cwd: root,
+        workspaceRoot: root,
+        runId,
+        sink,
+        tools,
+        policy,
+        input: queuedInput(["delegate"]),
+      });
+
+      const events = (await readFile(logPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { event: string; run_id: string });
+      expect(events.every((event) => event.run_id === runId)).toBe(true);
+      expect(events.some((event) => event.event === "SubagentStop")).toBe(true);
+      expect(events.some((event) => event.event === "AssistantMessage")).toBe(true);
+      expect(events.at(-1)?.event).toBe("SessionEnd");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

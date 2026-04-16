@@ -106,10 +106,7 @@ async function loadFixture(file: string): Promise<Fixture> {
   return parsed;
 }
 
-export async function runFixture(
-  fixture: Fixture,
-  opts: EvalOptions,
-): Promise<FixtureResult> {
+export async function runFixture(fixture: Fixture, opts: EvalOptions): Promise<FixtureResult> {
   const root = await mkdtemp(join(tmpdir(), `harness-eval-${slug(fixture.name)}-`));
   const started = Date.now();
   const failures: string[] = [];
@@ -186,11 +183,7 @@ export async function runFixture(
   };
 }
 
-async function persistRunLog(
-  root: string,
-  runId: string,
-  sink: MemoryEventSink,
-): Promise<void> {
+async function persistRunLog(root: string, runId: string, sink: MemoryEventSink): Promise<void> {
   const dir = join(root, ".harness", "runs", runId);
   await mkdir(dir, { recursive: true });
   const lines = sink.events.map((e) => JSON.stringify(e)).join("\n") + "\n";
@@ -236,18 +229,14 @@ export async function checkAssertions(
       });
       const expectedExit = a.command.exitCode ?? 0;
       if (res.exitCode !== expectedExit) {
-        failures.push(
-          `command exit=${res.exitCode} (expected ${expectedExit}): ${a.command.cmd}`,
-        );
+        failures.push(`command exit=${res.exitCode} (expected ${expectedExit}): ${a.command.cmd}`);
       }
       const stdout = String(res.stdout ?? "");
       for (const m of a.command.stdoutContains ?? []) {
         if (!stdout.includes(m)) failures.push(`command stdout missing: ${m}`);
       }
     } catch (err) {
-      failures.push(
-        `command failed to spawn: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      failures.push(`command failed to spawn: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -258,12 +247,15 @@ export async function checkAssertions(
 
 function printResult(r: FixtureResult): void {
   const tag = r.pass ? pc.green("PASS") : pc.red("FAIL");
-  console.log(
-    `  ${tag}  turns=${r.turns} tools=${r.toolCalls} ${r.durationMs}ms`,
-  );
+  console.log(`  ${tag}  turns=${r.turns} tools=${r.toolCalls} ${r.durationMs}ms`);
   for (const f of r.failures) console.log(pc.red(`    ✗ ${f}`));
 }
 
 function slug(s: string): string {
-  return s.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 32) || `${randomUUID().slice(0, 8)}`;
+  return (
+    s
+      .replace(/[^a-z0-9]+/gi, "-")
+      .toLowerCase()
+      .slice(0, 32) || `${randomUUID().slice(0, 8)}`
+  );
 }

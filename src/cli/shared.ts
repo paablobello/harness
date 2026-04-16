@@ -4,8 +4,11 @@ import pc from "picocolors";
 
 import { createAnthropicAdapter } from "../adapters/anthropic.js";
 import { createOpenAIAdapter } from "../adapters/openai.js";
+import { loadAgentsMd } from "../config/agents-md.js";
 import { defaultPolicy } from "../policy/defaults.js";
 import { PolicyEngine, type AskPrompt } from "../policy/engine.js";
+import { createBuiltinSensors } from "../sensors/builtin.js";
+import type { Sensor } from "../sensors/types.js";
 import { createBuiltinRegistry } from "../tools/builtin.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ModelAdapter, PermissionMode } from "../types.js";
@@ -25,8 +28,18 @@ export function buildRegistry(): ToolRegistry {
   return createBuiltinRegistry();
 }
 
+export function buildSensors(): Sensor[] {
+  return createBuiltinSensors();
+}
+
 export function buildPolicy(mode: PermissionMode, ask: AskPrompt): PolicyEngine {
   return new PolicyEngine({ rules: defaultPolicy, mode, ask });
+}
+
+export async function composeSystemPrompt(system: string, cwd: string): Promise<string> {
+  const projectGuide = await loadAgentsMd(cwd);
+  if (!projectGuide) return system;
+  return `${system}\n\n<project-guide>\n${projectGuide}\n</project-guide>`;
 }
 
 /** Ask the user via stdin whether to allow a tool call. */
@@ -34,9 +47,7 @@ export function terminalAsk(rl: readline.Interface): AskPrompt {
   return async ({ tool, input, reason }) => {
     const summary = summarizeInput(tool, input);
     const reasonLine = reason ? pc.dim(` (${reason})`) : "";
-    console.log(
-      pc.magenta(`\n? ${tool}${reasonLine}`) + (summary ? pc.dim(`\n  ${summary}`) : ""),
-    );
+    console.log(pc.magenta(`\n? ${tool}${reasonLine}`) + (summary ? pc.dim(`\n  ${summary}`) : ""));
     const answer = (await rl.question(pc.magenta("  allow? [y/N] "))).trim().toLowerCase();
     return answer === "y" || answer === "yes";
   };

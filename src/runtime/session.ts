@@ -35,6 +35,10 @@ export type SessionConfig = {
   sensors?: Sensor[];
   /** Absolute path used to confine tool paths. Defaults to `cwd`. */
   workspaceRoot?: string;
+  /** Optional caller-provided id used to correlate every event in one recorded run. */
+  runId?: string;
+  /** Internal: sub-sessions sharing a sink should not close it. Default true. */
+  closeSink?: boolean;
   /** Max tool calls to execute between two user inputs. Default 25. */
   maxToolsPerUserTurn?: number;
   /** Internal: current subagent recursion depth. Default 0. */
@@ -68,7 +72,8 @@ const DEFAULT_SUBAGENT_SYSTEM =
 
 export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   const sessionId = randomUUID();
-  const runId = randomUUID();
+  const runId = cfg.runId ?? randomUUID();
+  const closeSink = cfg.closeSink ?? true;
   const workspaceRoot = cfg.workspaceRoot ?? cfg.cwd;
   const maxTools = cfg.maxToolsPerUserTurn ?? 25;
   const signal = cfg.signal ?? new AbortController().signal;
@@ -153,6 +158,8 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
       system: opts.system ?? DEFAULT_SUBAGENT_SYSTEM,
       cwd: cfg.cwd,
       workspaceRoot,
+      runId,
+      closeSink: false,
       sink: cfg.sink,
       tools: childRegistry,
       ...(cfg.policy ? { policy: cfg.policy } : {}),
@@ -228,7 +235,9 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
       });
       cfg.onSensorRun?.({ name: s.name, ok: result.ok, message: result.message });
       if (result.message) {
-        pendingReminders.push(`<sensor-feedback sensor="${s.name}">\n${result.message}\n</sensor-feedback>`);
+        pendingReminders.push(
+          `<sensor-feedback sensor="${s.name}">\n${result.message}\n</sensor-feedback>`,
+        );
       }
     }
   };
@@ -566,7 +575,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         .dispatch({ ...hookBase("SessionEnd"), end_reason: endReason })
         .catch(() => undefined);
     }
-    await cfg.sink.close();
+    if (closeSink) await cfg.sink.close();
   }
 
   return {

@@ -33,10 +33,7 @@ describe("apply_patch", () => {
 +dos
  three
 `;
-    const r = await applyPatchTool.run(
-      { path: "a.txt", unified_diff: diff },
-      ctx(),
-    );
+    const r = await applyPatchTool.run({ path: "a.txt", unified_diff: diff }, ctx());
     expect(r.ok).toBe(true);
     expect(await readFile(p, "utf8")).toBe("one\ndos\nthree\n");
   });

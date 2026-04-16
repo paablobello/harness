@@ -68,7 +68,9 @@ export function initCommand(): Command {
       for (const t of targets) {
         const abs = join(root, t.rel);
         if (!opts.force && (await exists(abs))) {
-          console.log(pc.yellow(`  skip  ${t.rel}`) + pc.dim(" (exists; pass --force to overwrite)"));
+          console.log(
+            pc.yellow(`  skip  ${t.rel}`) + pc.dim(" (exists; pass --force to overwrite)"),
+          );
           skipped += 1;
           continue;
         }
@@ -80,7 +82,7 @@ export function initCommand(): Command {
 
       console.log(pc.dim(`\n${wrote} written, ${skipped} skipped — root: ${root}`));
       if (wrote > 0) {
-        console.log(pc.dim("next: `harness doctor` then `harness run \"...\"`"));
+        console.log(pc.dim('next: `harness doctor` then `harness run "..."`'));
       }
     });
 }

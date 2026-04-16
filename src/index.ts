@@ -64,8 +64,20 @@ export type {
 } from "./hooks/dispatcher.js";
 
 // Sensors
-export type { Sensor, SensorContext, SensorKind, SensorResult, SensorTrigger } from "./sensors/types.js";
-export { createBuiltinSensors, lintSensor, testSensor, typecheckSensor, llmReviewSensor } from "./sensors/builtin.js";
+export type {
+  Sensor,
+  SensorContext,
+  SensorKind,
+  SensorResult,
+  SensorTrigger,
+} from "./sensors/types.js";
+export {
+  createBuiltinSensors,
+  lintSensor,
+  testSensor,
+  typecheckSensor,
+  llmReviewSensor,
+} from "./sensors/builtin.js";
 export { shellSensor } from "./sensors/shell.js";
 
 // Config

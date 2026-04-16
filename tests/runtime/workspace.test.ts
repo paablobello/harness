@@ -39,9 +39,7 @@ describe("resolveWithinWorkspace", () => {
   });
 
   it("rejects ../ traversal", async () => {
-    await expect(resolveWithinWorkspace(root, "../outside")).rejects.toThrow(
-      /escapes workspace/,
-    );
+    await expect(resolveWithinWorkspace(root, "../outside")).rejects.toThrow(/escapes workspace/);
   });
 
   it("defeats symlink escapes", async () => {

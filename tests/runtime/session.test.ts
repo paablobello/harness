@@ -78,9 +78,7 @@ describe("runSession", () => {
 
   it("ends with error reason when adapter yields stop=error", async () => {
     const sink = new MemoryEventSink();
-    const adapter = createScriptedAdapter([
-      [{ type: "stop", reason: "error", error: "boom" }],
-    ]);
+    const adapter = createScriptedAdapter([[{ type: "stop", reason: "error", error: "boom" }]]);
 
     await runSession({
       adapter,

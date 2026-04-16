@@ -143,12 +143,7 @@ describe("runSession with tools", () => {
         { type: "usage" as const, inputTokens: 1, outputTokens: 1 },
         { type: "stop" as const, reason: "end_turn" as const },
       ];
-      const adapter = createScriptedAdapter([
-        loopTurn,
-        loopTurn,
-        loopTurn,
-        endTurn,
-      ]);
+      const adapter = createScriptedAdapter([loopTurn, loopTurn, loopTurn, endTurn]);
 
       await runSession({
         adapter,
@@ -163,9 +158,7 @@ describe("runSession with tools", () => {
       });
 
       const toolResults = sink.events.filter((e) => e.event === "ToolResult");
-      const aborted = toolResults.find(
-        (e) => "output" in e && e.output.includes("exceeded max"),
-      );
+      const aborted = toolResults.find((e) => "output" in e && e.output.includes("exceeded max"));
       expect(aborted).toBeDefined();
     } finally {
       await rm(root, { recursive: true, force: true });

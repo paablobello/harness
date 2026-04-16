@@ -57,14 +57,19 @@ describe("PolicyEngine (defaults)", () => {
     expect(ask).toHaveBeenCalledOnce();
   });
 
-  it("bypass mode short-circuits to allow", async () => {
+  it("bypass mode allows asks but still respects explicit denies", async () => {
     const ask = vi.fn(async () => false);
     const engine = new PolicyEngine({ rules: defaultPolicy, mode: "bypassPermissions", ask });
-    const decision = await engine.decide({
+    const safe = await engine.decide({
+      tool: runTool,
+      input: { command: "node -v" },
+    });
+    const destructive = await engine.decide({
       tool: runTool,
       input: { command: "rm -rf /" },
     });
-    expect(decision.decision).toBe("allow");
+    expect(safe.decision).toBe("allow");
+    expect(destructive.decision).toBe("deny");
     expect(ask).not.toHaveBeenCalled();
   });
 

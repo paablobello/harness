@@ -36,16 +36,19 @@ export class PolicyEngine {
    * Decide whether a tool invocation should proceed.
    *
    * Permission modes short-circuit matching:
-   *  - bypassPermissions → always allow
+   *  - explicit deny     → always deny
+   *  - bypassPermissions → allow everything else
    *  - plan              → deny all write/execute ("planned only")
    *  - acceptEdits       → allow write, ask still applies to execute
    *  - default           → rule matching
    */
-  async decide(req: {
-    tool: ToolDefinition;
-    input: unknown;
-  }): Promise<PolicyDecision> {
+  async decide(req: { tool: ToolDefinition; input: unknown }): Promise<PolicyDecision> {
     const { tool, input } = req;
+    const match = this.firstMatch(tool.name, input);
+
+    if (match?.decision === "deny") {
+      return { decision: "deny", reason: match.reason ?? "denied by policy" };
+    }
 
     if (this.mode === "bypassPermissions") return { decision: "allow" };
     if (this.mode === "plan" && tool.risk !== "read") {
@@ -55,15 +58,12 @@ export class PolicyEngine {
       return { decision: "allow" };
     }
 
-    const match = this.firstMatch(tool.name, input);
     const base: PolicyDecision =
       match?.decision === "allow"
         ? { decision: "allow" }
-        : match?.decision === "deny"
-          ? { decision: "deny", reason: match.reason ?? "denied by policy" }
-          : match?.decision === "ask"
-            ? { decision: "ask", ...(match.reason ? { reason: match.reason } : {}) }
-            : { decision: "ask" };
+        : match?.decision === "ask"
+          ? { decision: "ask", ...(match.reason ? { reason: match.reason } : {}) }
+          : { decision: "ask" };
 
     if (base.decision !== "ask") return base;
 

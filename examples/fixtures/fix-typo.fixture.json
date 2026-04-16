@@ -8,9 +8,7 @@
     }
   },
   "assertions": {
-    "fileContains": [
-      { "path": "greeting.js", "matches": ["Hello, world"] }
-    ],
+    "fileContains": [{ "path": "greeting.js", "matches": ["Hello, world"] }],
     "command": {
       "cmd": "node greeting.js",
       "stdoutContains": ["Hello, world"]

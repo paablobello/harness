@@ -51,6 +51,7 @@ explicit deny. That's the only way to make the denylist meaningful.
 ## Consequences
 
 **Good**:
+
 - The default policy fits in 20 lines of `src/policy/defaults.ts` and reads
   like documentation.
 - Auditing a session is trivial: every tool call emits a `PolicyDecision`
@@ -59,6 +60,7 @@ explicit deny. That's the only way to make the denylist meaningful.
   user says "yes" to a specific `git status`, we don't ask again that session.
 
 **Bad / accepted**:
+
 - Authors of policy rules need to know the input shape of each tool to write
   patterns. The alternative (typed schemas per tool with named fields) would
   bloat the rule definition. Documented per-tool subject extraction is

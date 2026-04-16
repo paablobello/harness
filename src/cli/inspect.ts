@@ -94,8 +94,7 @@ export function renderTimeline(events: HarnessEvent[], opts: RenderOpts = { full
     switch (e.event) {
       case "SessionStart":
         console.log(
-          pc.bold("Session ") +
-            pc.dim(`${e.session_id.slice(0, 8)} run=${e.run_id.slice(0, 8)}`),
+          pc.bold("Session ") + pc.dim(`${e.session_id.slice(0, 8)} run=${e.run_id.slice(0, 8)}`),
         );
         console.log(pc.dim(`  ${e.adapter}:${e.model}  cwd=${e.cwd}`));
         break;
@@ -197,5 +196,7 @@ export function renderTimeline(events: HarnessEvent[], opts: RenderOpts = { full
 function truncate(text: string, full: boolean, max: number = PREVIEW_CHARS): string {
   if (full) return text;
   const single = text.replace(/\n/g, " ⏎ ");
-  return single.length <= max ? single : single.slice(0, max) + pc.dim(` …(+${single.length - max})`);
+  return single.length <= max
+    ? single
+    : single.slice(0, max) + pc.dim(` …(+${single.length - max})`);
 }

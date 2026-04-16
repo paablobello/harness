@@ -4,9 +4,7 @@
   "permissionMode": "bypassPermissions",
   "assertions": {
     "filesExist": ["fizzbuzz.js"],
-    "fileContains": [
-      { "path": "fizzbuzz.js", "matches": ["function", "Fizz", "Buzz"] }
-    ],
+    "fileContains": [{ "path": "fizzbuzz.js", "matches": ["function", "Fizz", "Buzz"] }],
     "command": {
       "cmd": "node fizzbuzz.js",
       "stdoutContains": ["FizzBuzz"]
