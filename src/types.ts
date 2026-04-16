@@ -52,7 +52,29 @@ export type ToolContext = {
   signal: AbortSignal;
   sessionId: string;
   runId: string;
+  /** Provided by the runtime when subagents are enabled; lets a tool spawn a child session. */
+  spawnSubagent?: SpawnSubagent;
 };
+
+export type SpawnSubagentOptions = {
+  prompt: string;
+  description?: string;
+  /** Filter the parent's tool registry to these tool names. */
+  allowedTools?: string[];
+  /** Override system prompt for the subagent. */
+  system?: string;
+};
+
+export type SpawnSubagentResult = {
+  agentId: string;
+  lastMessage: string;
+  turns: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostUsd: number;
+};
+
+export type SpawnSubagent = (opts: SpawnSubagentOptions) => Promise<SpawnSubagentResult>;
 
 export type ToolResult = {
   ok: boolean;
@@ -64,6 +86,8 @@ export type ToolDefinition<I = unknown> = {
   name: string;
   description: string;
   inputSchema: ZodType<I>;
+  /** When provided, used directly as the JSON schema sent to the model. Otherwise derived from `inputSchema`. */
+  jsonSchema?: unknown;
   risk: ToolRisk;
   source: ToolSource;
   run(input: I, ctx: ToolContext): Promise<ToolResult>;

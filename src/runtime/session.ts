@@ -3,8 +3,15 @@ import { randomUUID } from "node:crypto";
 import type { HookDispatcher, HookPayload, HookPayloadBase } from "../hooks/dispatcher.js";
 import type { PolicyEngine } from "../policy/engine.js";
 import type { Sensor, SensorContext } from "../sensors/types.js";
-import type { ToolRegistry } from "../tools/registry.js";
-import type { ConversationMessage, ModelAdapter, ToolCall } from "../types.js";
+import { ToolRegistry } from "../tools/registry.js";
+import type {
+  ConversationMessage,
+  ModelAdapter,
+  SpawnSubagent,
+  SpawnSubagentOptions,
+  SpawnSubagentResult,
+  ToolCall,
+} from "../types.js";
 import { computeCost } from "./cost.js";
 import type { EventSink, HarnessEvent, SessionEndReason } from "./events.js";
 
@@ -30,6 +37,10 @@ export type SessionConfig = {
   workspaceRoot?: string;
   /** Max tool calls to execute between two user inputs. Default 25. */
   maxToolsPerUserTurn?: number;
+  /** Internal: current subagent recursion depth. Default 0. */
+  subagentDepth?: number;
+  /** Max subagent recursion depth. Default 1 (parent may spawn, children may not). */
+  maxSubagentDepth?: number;
   onAssistantDelta?: (text: string) => void;
   onAssistantMessage?: (text: string) => void;
   onToolCall?: (call: ToolCall) => void;
@@ -45,7 +56,15 @@ export type RunSummary = {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCostUsd: number;
+  /** Last assistant message text emitted during the session (used by subagent results). */
+  lastAssistantMessage: string;
 };
+
+const DEFAULT_SUBAGENT_SYSTEM =
+  "You are a focused subagent spawned from a parent session. You have no memory of " +
+  "the parent's conversation — everything you need is in the task below. Work " +
+  "efficiently, use tools as needed, and finish with a concise final message that " +
+  "summarizes what you did and any relevant output.";
 
 export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   const sessionId = randomUUID();
@@ -92,6 +111,91 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   let totalCost = 0;
   let turns = 0;
   let endReason: SessionEndReason = "eof";
+  let lastAssistantMessage = "";
+  const subagentDepth = cfg.subagentDepth ?? 0;
+  const maxSubagentDepth = cfg.maxSubagentDepth ?? 1;
+
+  const spawnSubagent: SpawnSubagent = async (opts: SpawnSubagentOptions) => {
+    if (subagentDepth >= maxSubagentDepth) {
+      throw new Error(
+        `subagent depth limit reached (${maxSubagentDepth}); nested subagents are disabled`,
+      );
+    }
+    const agentId = randomUUID();
+    const agentType = opts.description ?? "subagent";
+
+    const parentTools = cfg.tools?.list() ?? [];
+    const childRegistry = new ToolRegistry();
+    for (const t of parentTools) {
+      if (t.name === "subagent") continue;
+      if (opts.allowedTools && !opts.allowedTools.includes(t.name)) continue;
+      childRegistry.register(t);
+    }
+
+    cfg.sink.write({
+      ...base(),
+      event: "SubagentStart",
+      agent_id: agentId,
+      agent_type: agentType,
+      ...(opts.description ? { description: opts.description } : {}),
+    });
+    if (cfg.hooks) {
+      await cfg.hooks.dispatch({
+        ...hookBase("SubagentStart"),
+        agent_id: agentId,
+        agent_type: agentType,
+      });
+    }
+
+    let delivered = false;
+    const child = await runSession({
+      adapter: cfg.adapter,
+      system: opts.system ?? DEFAULT_SUBAGENT_SYSTEM,
+      cwd: cfg.cwd,
+      workspaceRoot,
+      sink: cfg.sink,
+      tools: childRegistry,
+      ...(cfg.policy ? { policy: cfg.policy } : {}),
+      ...(cfg.hooks ? { hooks: cfg.hooks } : {}),
+      // skip sensors in subagents — they'd re-run typecheck/etc at every turn
+      subagentDepth: subagentDepth + 1,
+      maxSubagentDepth,
+      input: {
+        async next() {
+          if (delivered) return null;
+          delivered = true;
+          return opts.prompt;
+        },
+      },
+    });
+
+    cfg.sink.write({
+      ...base(),
+      event: "SubagentStop",
+      agent_id: agentId,
+      agent_type: agentType,
+      last_message: child.lastAssistantMessage,
+      turns: child.turns,
+    });
+    if (cfg.hooks) {
+      await cfg.hooks.dispatch({
+        ...hookBase("SubagentStop"),
+        agent_id: agentId,
+        agent_type: agentType,
+        last_assistant_message: child.lastAssistantMessage,
+      });
+    }
+
+    const result: SpawnSubagentResult = {
+      agentId,
+      lastMessage: child.lastAssistantMessage,
+      turns: child.turns,
+      totalInputTokens: child.totalInputTokens,
+      totalOutputTokens: child.totalOutputTokens,
+      totalCostUsd: child.totalCostUsd,
+    };
+    return result;
+  };
 
   const runSensors = async (
     trigger: Sensor["trigger"],
@@ -201,6 +305,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
           if (assistantText) {
             cfg.sink.write({ ...base(), event: "AssistantMessage", text: assistantText });
             cfg.onAssistantMessage?.(assistantText);
+            lastAssistantMessage = assistantText;
           }
           messages.push({
             role: "assistant",
@@ -382,6 +487,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               signal,
               sessionId,
               runId,
+              spawnSubagent,
             });
             const duration = Date.now() - started;
             cfg.sink.write({
@@ -470,5 +576,6 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
     totalInputTokens: totalInput,
     totalOutputTokens: totalOutput,
     totalCostUsd: totalCost,
+    lastAssistantMessage,
   };
 }

@@ -5,6 +5,7 @@ import { listFilesTool } from "./list-files.js";
 import { readFileTool } from "./read-file.js";
 import { ToolRegistry } from "./registry.js";
 import { runCommandTool } from "./run-command.js";
+import { subagentTool } from "./subagent.js";
 
 export function createBuiltinRegistry(): ToolRegistry {
   const reg = new ToolRegistry();
@@ -14,6 +15,7 @@ export function createBuiltinRegistry(): ToolRegistry {
   reg.register(editFileTool);
   reg.register(applyPatchTool);
   reg.register(runCommandTool);
+  reg.register(subagentTool);
   return reg;
 }
 
@@ -24,4 +26,5 @@ export {
   listFilesTool,
   readFileTool,
   runCommandTool,
+  subagentTool,
 };

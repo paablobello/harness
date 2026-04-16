@@ -24,7 +24,7 @@ export class ToolRegistry {
     return this.list().map((t) => ({
       name: t.name,
       description: t.description,
-      inputSchema: zodToJsonSchema(t.inputSchema, { target: "jsonSchema7" }),
+      inputSchema: t.jsonSchema ?? zodToJsonSchema(t.inputSchema, { target: "jsonSchema7" }),
     }));
   }
 }

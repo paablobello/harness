@@ -59,6 +59,19 @@ export type HarnessEvent = BaseFields &
         duration_ms: number;
       }
     | {
+        event: "SubagentStart";
+        agent_id: string;
+        agent_type: string;
+        description?: string;
+      }
+    | {
+        event: "SubagentStop";
+        agent_id: string;
+        agent_type: string;
+        last_message: string;
+        turns: number;
+      }
+    | {
         event: "Usage";
         input_tokens: number;
         output_tokens: number;
