@@ -24,9 +24,9 @@ type RunOptions = {
   system?: string;
   cwd?: string;
   permissionMode?: string;
-  noConfig?: boolean;
-  noMcp?: boolean;
-  noSensors?: boolean;
+  config?: boolean;
+  mcp?: boolean;
+  sensors?: boolean;
 };
 
 const DEFAULT_SYSTEM = `You are an autonomous coding assistant running inside a sandboxed workspace.
@@ -50,7 +50,7 @@ export function runCommand(): Command {
       const task = taskParts.join(" ");
       const cwd = resolve(rawOpts.cwd ?? process.cwd());
       const adapter = buildAdapter(rawOpts);
-      const loaded = await loadCliConfig(cwd, rawOpts.noConfig !== true);
+      const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
       const system = await composeSystemPrompt(
         rawOpts.system ?? config.system ?? DEFAULT_SYSTEM,
@@ -60,7 +60,7 @@ export function runCommand(): Command {
       const logPath = join(cwd, ".harness", "runs", runId, "events.jsonl");
       const toolSurface = await buildToolSurface(config, {
         toolsEnabled: true,
-        mcpEnabled: rawOpts.noMcp !== true,
+        mcpEnabled: rawOpts.mcp !== false,
       });
 
       console.log(pc.dim(`run: ${adapter.name}:${adapter.model} cwd=${cwd}`));
@@ -80,7 +80,8 @@ export function runCommand(): Command {
             terminalAsk(rl),
             config,
           );
-          const sensors = rawOpts.noSensors ? undefined : (config.sensors ?? buildSensors());
+          const sensors =
+            rawOpts.sensors === false ? undefined : (config.sensors ?? buildSensors());
 
           return await runSession({
             adapter,

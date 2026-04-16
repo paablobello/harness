@@ -24,10 +24,10 @@ type ChatOptions = {
   provider: "anthropic" | "openai";
   system?: string;
   permissionMode?: string;
-  noConfig?: boolean;
-  noMcp?: boolean;
-  noTools?: boolean;
-  noSensors?: boolean;
+  config?: boolean;
+  mcp?: boolean;
+  tools?: boolean;
+  sensors?: boolean;
 };
 
 const DEFAULT_SYSTEM = "You are a helpful coding assistant.";
@@ -46,7 +46,7 @@ export function chatCommand(): Command {
     .action(async (rawOpts: ChatOptions) => {
       const adapter = buildAdapter(rawOpts);
       const cwd = process.cwd();
-      const loaded = await loadCliConfig(cwd, rawOpts.noConfig !== true);
+      const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
       const system = await composeSystemPrompt(
         rawOpts.system ?? config.system ?? DEFAULT_SYSTEM,
@@ -55,8 +55,8 @@ export function chatCommand(): Command {
       const runId = randomUUID();
       const logPath = join(cwd, ".harness", "runs", runId, "events.jsonl");
       const toolSurface = await buildToolSurface(config, {
-        toolsEnabled: rawOpts.noTools !== true,
-        mcpEnabled: rawOpts.noMcp !== true,
+        toolsEnabled: rawOpts.tools !== false,
+        mcpEnabled: rawOpts.mcp !== false,
       });
 
       printBanner(adapter, logPath, Boolean(toolSurface.tools));
@@ -72,7 +72,8 @@ export function chatCommand(): Command {
           const policy = toolSurface.tools
             ? buildPolicy(permissionMode(rawOpts.permissionMode), terminalAsk(activeRl), config)
             : undefined;
-          const sensors = rawOpts.noSensors ? undefined : (config.sensors ?? buildSensors());
+          const sensors =
+            rawOpts.sensors === false ? undefined : (config.sensors ?? buildSensors());
 
           return await runSession({
             adapter,

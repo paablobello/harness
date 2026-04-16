@@ -7,8 +7,8 @@ import { buildToolSurface, loadCliConfig } from "./shared.js";
 
 type ToolsOptions = {
   cwd?: string;
-  noConfig?: boolean;
-  noMcp?: boolean;
+  config?: boolean;
+  mcp?: boolean;
 };
 
 export function toolsCommand(): Command {
@@ -19,10 +19,10 @@ export function toolsCommand(): Command {
     .option("--no-mcp", "Do not connect MCP servers from harness.config.*")
     .action(async (opts: ToolsOptions) => {
       const cwd = resolve(opts.cwd ?? process.cwd());
-      const loaded = await loadCliConfig(cwd, opts.noConfig !== true);
+      const loaded = await loadCliConfig(cwd, opts.config !== false);
       const toolSurface = await buildToolSurface(loaded.config, {
         toolsEnabled: true,
-        mcpEnabled: opts.noMcp !== true,
+        mcpEnabled: opts.mcp !== false,
       });
 
       try {

@@ -4,21 +4,30 @@ import { resolve } from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
 
+import {
+  loadHarnessConfig,
+  summarizeHarnessConfig,
+  validateHarnessConfig,
+} from "../config/harness-config.js";
+
 type Check = { name: string; ok: boolean; detail: string; required: boolean };
+type DoctorOptions = { cwd?: string; config?: boolean };
 
 const MIN_NODE_MAJOR = 20;
 
 export function doctorCommand(): Command {
   return new Command("doctor")
-    .description("Validate environment: node version, API keys, write permissions")
+    .description("Validate environment: node version, API keys, config, write permissions")
     .option("-C, --cwd <path>", "Project root to test write access on")
-    .action(async (opts: { cwd?: string }) => {
+    .option("--no-config", "Do not load harness.config.* from the workspace")
+    .action(async (opts: DoctorOptions) => {
       const cwd = resolve(opts.cwd ?? process.cwd());
       const checks: Check[] = [];
 
       checks.push(checkNodeVersion());
       checks.push(checkEnvKey("ANTHROPIC_API_KEY", false));
       checks.push(checkEnvKey("OPENAI_API_KEY", false));
+      checks.push(await checkHarnessConfig(cwd, opts.config !== false));
       checks.push(await checkWritable(cwd));
 
       const requiredFails = checks.filter((c) => c.required && !c.ok);
@@ -77,6 +86,53 @@ async function checkWritable(dir: string): Promise<Check> {
       name: "workspace writable",
       ok: false,
       detail: `${dir}: ${err instanceof Error ? err.message : String(err)}`,
+      required: true,
+    };
+  }
+}
+
+export async function checkHarnessConfig(cwd: string, enabled: boolean): Promise<Check> {
+  if (!enabled) {
+    return {
+      name: "harness config",
+      ok: true,
+      detail: "skipped (--no-config)",
+      required: false,
+    };
+  }
+
+  try {
+    const loaded = await loadHarnessConfig(cwd);
+    if (!loaded.path) {
+      return {
+        name: "harness config",
+        ok: false,
+        detail: "none found (optional; run `harness init` to create one)",
+        required: false,
+      };
+    }
+
+    const errors = validateHarnessConfig(loaded.config);
+    if (errors.length > 0) {
+      return {
+        name: "harness config",
+        ok: false,
+        detail: `${loaded.path}: ${errors.join("; ")}`,
+        required: true,
+      };
+    }
+
+    return {
+      name: "harness config",
+      ok: true,
+      detail: `${loaded.path} (${summarizeHarnessConfig(loaded.config)})`,
+      required: false,
+    };
+  } catch (err) {
+    return {
+      name: "harness config",
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
       required: true,
     };
   }

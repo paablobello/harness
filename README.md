@@ -7,7 +7,7 @@ sub-agents, and a deterministic JSONL event log for every run.
 
 ```
 harness init                          # scaffold harness.config.mjs + AGENTS.md
-harness doctor                        # check node + API keys + write perms
+harness doctor                        # check node + API keys + config + write perms
 harness run "fix the typo in greet.js, then run it"
 harness inspect latest                # read the timeline back
 harness eval examples/fixtures/*.json # regression-test the harness itself
@@ -135,7 +135,7 @@ node /path/to/harness-lab/dist/cli/main.js inspect latest
 For development:
 
 ```bash
-pnpm test            # unit + integration (63 tests)
+pnpm test            # unit + integration (72 tests)
 pnpm typecheck
 pnpm lint
 ```

@@ -70,3 +70,117 @@ export async function findHarnessConfig(cwd: string): Promise<string | null> {
   }
   return null;
 }
+
+export function validateHarnessConfig(config: HarnessConfig): string[] {
+  const errors: string[] = [];
+  const raw = config as Record<string, unknown>;
+
+  if (raw["system"] !== undefined && typeof raw["system"] !== "string") {
+    errors.push("system must be a string");
+  }
+  if (raw["maxToolsPerUserTurn"] !== undefined && !isPositiveInteger(raw["maxToolsPerUserTurn"])) {
+    errors.push("maxToolsPerUserTurn must be a positive integer");
+  }
+  if (raw["maxSubagentDepth"] !== undefined && !isNonNegativeInteger(raw["maxSubagentDepth"])) {
+    errors.push("maxSubagentDepth must be a non-negative integer");
+  }
+  if (raw["policy"] !== undefined && !hasMethods(raw["policy"], ["decide"])) {
+    errors.push("policy must expose decide()");
+  }
+  if (
+    raw["tools"] !== undefined &&
+    !hasMethods(raw["tools"], ["get", "list", "register", "specs"])
+  ) {
+    errors.push("tools must be a ToolRegistry-like object");
+  }
+  if (raw["hooks"] !== undefined && !hasMethods(raw["hooks"], ["dispatch"])) {
+    errors.push("hooks must expose dispatch()");
+  }
+  if (raw["policyRules"] !== undefined && !Array.isArray(raw["policyRules"])) {
+    errors.push("policyRules must be an array");
+  }
+  if (raw["sensors"] !== undefined) {
+    if (!Array.isArray(raw["sensors"])) {
+      errors.push("sensors must be an array");
+    } else {
+      raw["sensors"].forEach((sensor, i) => {
+        if (
+          !isRecord(sensor) ||
+          typeof sensor["name"] !== "string" ||
+          typeof sensor["run"] !== "function"
+        ) {
+          errors.push(`sensors[${i}] must include name and run()`);
+        }
+      });
+    }
+  }
+  if (raw["mcpServers"] !== undefined) {
+    if (!Array.isArray(raw["mcpServers"])) {
+      errors.push("mcpServers must be an array");
+    } else {
+      raw["mcpServers"].forEach((server, i) => {
+        if (!isRecord(server)) {
+          errors.push(`mcpServers[${i}] must be an object`);
+          return;
+        }
+        if (typeof server["name"] !== "string" || server["name"].length === 0) {
+          errors.push(`mcpServers[${i}].name must be a non-empty string`);
+        }
+        if (typeof server["command"] !== "string" || server["command"].length === 0) {
+          errors.push(`mcpServers[${i}].command must be a non-empty string`);
+        }
+        if (
+          server["args"] !== undefined &&
+          (!Array.isArray(server["args"]) || server["args"].some((arg) => typeof arg !== "string"))
+        ) {
+          errors.push(`mcpServers[${i}].args must be an array of strings`);
+        }
+        if (server["cwd"] !== undefined && typeof server["cwd"] !== "string") {
+          errors.push(`mcpServers[${i}].cwd must be a string`);
+        }
+        if (server["env"] !== undefined && !isStringRecord(server["env"])) {
+          errors.push(`mcpServers[${i}].env must be an object of string values`);
+        }
+      });
+    }
+  }
+
+  return errors;
+}
+
+export function summarizeHarnessConfig(config: HarnessConfig): string {
+  const parts: string[] = [];
+  if (config.system) parts.push("system");
+  if (config.tools) parts.push("tools");
+  if (config.policy) parts.push("policy");
+  if (config.policyRules) parts.push(`${config.policyRules.length} policy rule(s)`);
+  if (config.hooks) parts.push("hooks");
+  if (config.sensors) parts.push(`${config.sensors.length} sensor(s)`);
+  if (config.mcpServers) parts.push(`${config.mcpServers.length} MCP server(s)`);
+  if (config.maxToolsPerUserTurn !== undefined)
+    parts.push(`maxTools=${config.maxToolsPerUserTurn}`);
+  if (config.maxSubagentDepth !== undefined) parts.push(`maxSubagents=${config.maxSubagentDepth}`);
+  return parts.length > 0 ? parts.join(", ") : "no overrides";
+}
+
+function hasMethods(value: unknown, methods: string[]): boolean {
+  if (!isRecord(value)) return false;
+  return methods.every((method) => typeof value[method] === "function");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function isStringRecord(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return Object.values(value).every((v) => typeof v === "string");
+}
+
+function isPositiveInteger(value: unknown): boolean {
+  return Number.isInteger(value) && Number(value) > 0;
+}
+
+function isNonNegativeInteger(value: unknown): boolean {
+  return Number.isInteger(value) && Number(value) >= 0;
+}

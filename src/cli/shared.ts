@@ -9,6 +9,7 @@ import {
   loadHarnessConfig,
   type HarnessConfig,
   type LoadedHarnessConfig,
+  validateHarnessConfig,
 } from "../config/harness-config.js";
 import { McpHub } from "../mcp/client.js";
 import { defaultPolicy } from "../policy/defaults.js";
@@ -56,7 +57,14 @@ export async function composeSystemPrompt(system: string, cwd: string): Promise<
 
 export async function loadCliConfig(cwd: string, enabled: boolean): Promise<LoadedHarnessConfig> {
   if (!enabled) return { path: null, config: {} };
-  return loadHarnessConfig(cwd);
+  const loaded = await loadHarnessConfig(cwd);
+  const errors = validateHarnessConfig(loaded.config);
+  if (errors.length > 0) {
+    throw new Error(
+      `Invalid harness config${loaded.path ? ` at ${loaded.path}` : ""}: ${errors.join("; ")}`,
+    );
+  }
+  return loaded;
 }
 
 export async function buildToolSurface(

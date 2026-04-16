@@ -86,5 +86,10 @@ export type { McpServerSpec } from "./mcp/client.js";
 
 // Config
 export { loadAgentsMd } from "./config/agents-md.js";
-export { findHarnessConfig, loadHarnessConfig } from "./config/harness-config.js";
+export {
+  findHarnessConfig,
+  loadHarnessConfig,
+  summarizeHarnessConfig,
+  validateHarnessConfig,
+} from "./config/harness-config.js";
 export type { HarnessConfig, LoadedHarnessConfig } from "./config/harness-config.js";
