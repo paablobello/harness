@@ -7,7 +7,7 @@ describe("chat input helpers", () => {
     expect(isExitInput("exit")).toBe(true);
     expect(isExitInput(" quit ")).toBe(true);
     expect(isExitInput("q")).toBe(true);
-    expect(isExitInput("/exit")).toBe(false);
+    expect(isExitInput("/exit")).toBe(true);
   });
 
   it("detects accidental shell invocations typed inside chat", () => {

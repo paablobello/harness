@@ -58,7 +58,7 @@ export function runCommand(): Command {
       const task = taskParts.join(" ");
       const cwd = resolve(rawOpts.cwd ?? process.cwd());
       const providerOpts = resolveProviderOpts(rawOpts);
-      const adapter = buildAdapter(providerOpts);
+      const adapter = await buildAdapter(providerOpts);
       const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
       const system = await composeSystemPrompt(

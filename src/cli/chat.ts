@@ -19,6 +19,8 @@ import {
   resolveProviderOpts,
   terminalAsk,
 } from "./shared.js";
+import { runInkApp } from "./ui/bridge.js";
+import { isExitInput, isLikelyHarnessInvocation } from "./ui/commands.js";
 import {
   printRunSummary,
   printSensorResult,
@@ -42,6 +44,8 @@ type ChatOptions = {
   mcp?: boolean;
   tools?: boolean;
   sensors?: boolean;
+  plain?: boolean;
+  tui?: boolean;
 };
 
 const DEFAULT_SYSTEM = "You are a helpful coding assistant.";
@@ -57,9 +61,11 @@ export function chatCommand(): Command {
     .option("--no-mcp", "Do not connect MCP servers from harness.config.*")
     .option("--no-tools", "Disable built-in tools")
     .option("--no-sensors", "Disable built-in typecheck/lint/test sensors")
+    .option("--plain", "Force the plain renderer (no Ink TUI)")
+    .option("--tui", "Force the Ink TUI even if stdout is not a TTY")
     .action(async (rawOpts: ChatOptions) => {
       const providerOpts = resolveProviderOpts(rawOpts);
-      const adapter = buildAdapter(providerOpts);
+      const adapter = await buildAdapter(providerOpts);
       const cwd = process.cwd();
       const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
@@ -75,92 +81,161 @@ export function chatCommand(): Command {
       });
       const mode = permissionMode(rawOpts.permissionMode);
       const tools = toolSurface.tools?.list();
-      const uiState = { details: false };
 
-      printSessionHeader({
-        mode: "chat",
-        adapter,
-        cwd,
-        logPath,
-        configPath: loaded.path,
-        permissionMode: mode,
-        withTools: Boolean(toolSurface.tools),
-        toolCount: tools?.length ?? 0,
-      });
+      const useInk =
+        rawOpts.tui === true ||
+        (rawOpts.plain !== true &&
+          process.stdout.isTTY === true &&
+          process.env["HARNESS_PLAIN_UI"] !== "1");
 
-      let assistantStarted = false;
-      const summary = await (async () => {
-        let rl: ReturnType<typeof readline.createInterface> | undefined;
-        try {
-          const sink = await FileEventSink.open(logPath);
-          rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          const activeRl = rl;
-          const policy = toolSurface.tools
-            ? buildPolicy(mode, terminalAsk(activeRl), config)
-            : undefined;
-          const sensors =
-            rawOpts.sensors === false ? undefined : (config.sensors ?? buildSensors());
-
-          return await runSession({
+      const sink = await FileEventSink.open(logPath);
+      try {
+        if (useInk) {
+          const summary = await runInkApp({
             adapter,
             system,
             cwd,
             runId,
             sink,
+            logPath,
+            configPath: loaded.path,
+            permissionMode: mode,
+            harnessConfig: config,
             ...(toolSurface.tools ? { tools: toolSurface.tools } : {}),
-            ...(policy ? { policy } : {}),
             ...(config.hooks ? { hooks: config.hooks } : {}),
-            ...(sensors ? { sensors } : {}),
-            ...(config.maxToolsPerUserTurn !== undefined
-              ? { maxToolsPerUserTurn: config.maxToolsPerUserTurn }
+            ...(rawOpts.sensors === false ? {} : { sensors: config.sensors ?? buildSensors() }),
+            ...(toolSurface.tools
+              ? { policyFactory: (ask) => buildPolicy(mode, ask, config) }
               : {}),
-            ...(config.maxSubagentDepth !== undefined
-              ? { maxSubagentDepth: config.maxSubagentDepth }
-              : {}),
-            input: {
-              async next() {
-                return readUserInput(activeRl, {
-                  adapter,
-                  cwd,
-                  logPath,
-                  configPath: loaded.path,
-                  permissionMode: mode,
-                  withTools: Boolean(toolSurface.tools),
-                  toolCount: tools?.length ?? 0,
-                  tools,
-                  uiState,
-                });
-              },
-            },
-            onAssistantDelta: (text) => {
-              if (!assistantStarted) {
-                process.stdout.write(pc.yellow(`${adapter.name}> `));
-                assistantStarted = true;
-              }
-              process.stdout.write(text);
-            },
-            onAssistantMessage: () => {
-              process.stdout.write("\n");
-              assistantStarted = false;
-            },
-            onToolCall: (call) => {
-              printToolCall(call, { details: uiState.details });
-            },
-            onToolResult: (res) => {
-              printToolResult(res, { details: uiState.details });
-            },
-            onSensorRun: (res) => {
-              printSensorResult(res);
-            },
           });
-        } finally {
-          rl?.close();
-          await toolSurface.close();
+          printRunSummary("session", summary, logPath);
+        } else {
+          const summary = await runPlainChat({
+            adapter,
+            config,
+            loaded,
+            logPath,
+            mode,
+            cwd,
+            runId,
+            system,
+            sink,
+            toolSurface,
+            sensorsFlag: rawOpts.sensors !== false,
+            tools,
+          });
+          printRunSummary("session", summary, logPath);
         }
-      })();
-
-      printRunSummary("session", summary, logPath);
+      } finally {
+        await toolSurface.close();
+      }
     });
+}
+
+type PlainChatArgs = {
+  readonly adapter: ModelAdapter;
+  readonly config: Awaited<ReturnType<typeof loadCliConfig>>["config"];
+  readonly loaded: Awaited<ReturnType<typeof loadCliConfig>>;
+  readonly logPath: string;
+  readonly mode: ReturnType<typeof permissionMode>;
+  readonly cwd: string;
+  readonly runId: string;
+  readonly system: string;
+  readonly sink: FileEventSink;
+  readonly toolSurface: Awaited<ReturnType<typeof buildToolSurface>>;
+  readonly sensorsFlag: boolean;
+  readonly tools: { name: string; risk: string; source: string; description: string }[] | undefined;
+};
+
+async function runPlainChat(args: PlainChatArgs): ReturnType<typeof runSession> {
+  const {
+    adapter,
+    config,
+    loaded,
+    logPath,
+    mode,
+    cwd,
+    runId,
+    system,
+    sink,
+    toolSurface,
+    sensorsFlag,
+    tools,
+  } = args;
+  const uiState = { details: false };
+
+  printSessionHeader({
+    mode: "chat",
+    adapter,
+    cwd,
+    logPath,
+    configPath: loaded.path,
+    permissionMode: mode,
+    withTools: Boolean(toolSurface.tools),
+    toolCount: tools?.length ?? 0,
+  });
+
+  let assistantStarted = false;
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const policy = toolSurface.tools ? buildPolicy(mode, terminalAsk(rl), config) : undefined;
+    const sensors = !sensorsFlag ? undefined : (config.sensors ?? buildSensors());
+
+    return await runSession({
+      adapter,
+      system,
+      cwd,
+      runId,
+      sink,
+      ...(toolSurface.tools ? { tools: toolSurface.tools } : {}),
+      ...(policy ? { policy } : {}),
+      ...(config.hooks ? { hooks: config.hooks } : {}),
+      ...(sensors ? { sensors } : {}),
+      ...(config.maxToolsPerUserTurn !== undefined
+        ? { maxToolsPerUserTurn: config.maxToolsPerUserTurn }
+        : {}),
+      ...(config.maxSubagentDepth !== undefined
+        ? { maxSubagentDepth: config.maxSubagentDepth }
+        : {}),
+      input: {
+        async next() {
+          return readUserInput(rl, {
+            adapter,
+            cwd,
+            logPath,
+            configPath: loaded.path,
+            permissionMode: mode,
+            withTools: Boolean(toolSurface.tools),
+            toolCount: tools?.length ?? 0,
+            tools,
+            uiState,
+          });
+        },
+      },
+      onAssistantDelta: (text) => {
+        if (!assistantStarted) {
+          process.stdout.write(pc.yellow(`${adapter.name}> `));
+          assistantStarted = true;
+        }
+        process.stdout.write(text);
+      },
+      onAssistantMessage: () => {
+        process.stdout.write("\n");
+        assistantStarted = false;
+      },
+      onToolCall: (call) => {
+        printToolCall(call, { details: uiState.details });
+      },
+      onToolResult: (res) => {
+        printToolResult(res, { details: uiState.details });
+      },
+      onSensorRun: (res) => {
+        printSensorResult(res);
+      },
+    });
+  } finally {
+    rl.close();
+  }
 }
 
 type SlashContext = {
@@ -191,13 +266,7 @@ async function readUserInput(rl: readline.Interface, ctx: SlashContext): Promise
   }
 }
 
-export function isExitInput(line: string): boolean {
-  return ["exit", "quit", "q"].includes(line.trim().toLowerCase());
-}
-
-export function isLikelyHarnessInvocation(line: string): boolean {
-  return /^harness(\s|$)/.test(line.trim());
-}
+export { isExitInput, isLikelyHarnessInvocation } from "./ui/commands.js";
 
 function handleLocalInput(line: string, ctx: SlashContext): "send" | "handled" | "exit" {
   const trimmed = line.trim();

@@ -122,7 +122,7 @@ export async function runFixture(fixture: Fixture, opts: EvalOptions): Promise<F
       }
     }
 
-    const adapter = buildAdapter({
+    const adapter = await buildAdapter({
       model: fixture.model ?? opts.model,
       provider: fixture.provider ?? opts.provider,
     });

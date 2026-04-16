@@ -48,8 +48,15 @@ export type SessionConfig = {
   onAssistantDelta?: (text: string) => void;
   onAssistantMessage?: (text: string) => void;
   onToolCall?: (call: ToolCall) => void;
-  onToolResult?: (res: { id: string; name: string; ok: boolean; output: string }) => void;
+  onToolResult?: (res: {
+    id: string;
+    name: string;
+    ok: boolean;
+    output: string;
+    durationMs?: number;
+  }) => void;
   onSensorRun?: (res: { name: string; ok: boolean; message: string }) => void;
+  onUsage?: (usage: { inputTokens: number; outputTokens: number; costUsd?: number }) => void;
   signal?: AbortSignal;
 };
 
@@ -335,6 +342,11 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
           };
           if (lastUsage.cost !== undefined) usage.cost_usd = lastUsage.cost;
           cfg.sink.write(usage);
+          cfg.onUsage?.({
+            inputTokens: lastUsage.input,
+            outputTokens: lastUsage.output,
+            ...(lastUsage.cost !== undefined ? { costUsd: lastUsage.cost } : {}),
+          });
         }
 
         const stop: Extract<HarnessEvent, { event: "Stop" }> = {
@@ -373,6 +385,13 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               duration_ms: 0,
             });
             messages.push({ role: "tool", toolCallId: call.id, content: output, isError: true });
+            cfg.onToolResult?.({
+              id: call.id,
+              name: call.name,
+              ok: false,
+              output,
+              durationMs: 0,
+            });
             continue;
           }
           toolsThisUserTurn += 1;
@@ -399,6 +418,13 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               duration_ms: 0,
             });
             messages.push({ role: "tool", toolCallId: call.id, content: output, isError: true });
+            cfg.onToolResult?.({
+              id: call.id,
+              name: call.name,
+              ok: false,
+              output,
+              durationMs: 0,
+            });
             continue;
           }
 
@@ -415,6 +441,13 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               duration_ms: 0,
             });
             messages.push({ role: "tool", toolCallId: call.id, content: output, isError: true });
+            cfg.onToolResult?.({
+              id: call.id,
+              name: call.name,
+              ok: false,
+              output,
+              durationMs: 0,
+            });
             continue;
           }
 
@@ -445,7 +478,13 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               duration_ms: 0,
             });
             messages.push({ role: "tool", toolCallId: call.id, content: output, isError: true });
-            cfg.onToolResult?.({ id: call.id, name: call.name, ok: false, output });
+            cfg.onToolResult?.({
+              id: call.id,
+              name: call.name,
+              ok: false,
+              output,
+              durationMs: 0,
+            });
             continue;
           }
 
@@ -483,7 +522,13 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
                 content: output,
                 isError: true,
               });
-              cfg.onToolResult?.({ id: call.id, name: call.name, ok: false, output });
+              cfg.onToolResult?.({
+                id: call.id,
+                name: call.name,
+                ok: false,
+                output,
+                durationMs: 0,
+              });
               continue;
             }
           }
@@ -519,6 +564,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               name: call.name,
               ok: result.ok,
               output: result.output,
+              durationMs: duration,
             });
             if (cfg.hooks) {
               const hookPayload = result.ok
@@ -560,7 +606,13 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               duration_ms: duration,
             });
             messages.push({ role: "tool", toolCallId: call.id, content: output, isError: true });
-            cfg.onToolResult?.({ id: call.id, name: call.name, ok: false, output });
+            cfg.onToolResult?.({
+              id: call.id,
+              name: call.name,
+              ok: false,
+              output,
+              durationMs: duration,
+            });
           }
         }
       }

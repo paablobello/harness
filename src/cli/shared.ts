@@ -2,8 +2,6 @@ import type readline from "node:readline/promises";
 
 import pc from "picocolors";
 
-import { createAnthropicAdapter } from "../adapters/anthropic.js";
-import { createOpenAIAdapter } from "../adapters/openai.js";
 import { loadAgentsMd } from "../config/agents-md.js";
 import {
   loadHarnessConfig,
@@ -25,10 +23,16 @@ export type ProviderOpts = {
   provider?: "anthropic" | "openai";
 };
 
-export function buildAdapter(opts: ProviderOpts): ModelAdapter {
+export async function buildAdapter(opts: ProviderOpts): Promise<ModelAdapter> {
   const resolved = resolveProviderOpts(opts);
-  if (resolved.provider === "openai") return createOpenAIAdapter({ model: resolved.model });
-  if (resolved.provider === "anthropic") return createAnthropicAdapter({ model: resolved.model });
+  if (resolved.provider === "openai") {
+    const { createOpenAIAdapter } = await import("../adapters/openai.js");
+    return createOpenAIAdapter({ model: resolved.model });
+  }
+  if (resolved.provider === "anthropic") {
+    const { createAnthropicAdapter } = await import("../adapters/anthropic.js");
+    return createAnthropicAdapter({ model: resolved.model });
+  }
   throw new Error(`Unknown provider: ${resolved.provider}`);
 }
 
