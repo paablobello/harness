@@ -98,6 +98,12 @@ turn, never sensor noise spliced in the middle).
 The agent's prompt isn't one string — it's a stack of layers, each owned by a
 different part of the system:
 
+Before a session starts, the CLI loads `harness.config.mjs` / `.js` / `.cjs`
+from the workspace. That config can replace policy rules, hooks, sensors, the
+tool registry, subagent limits, and MCP server definitions. TypeScript config
+files are intentionally not runtime-loaded by the CLI; use the SDK directly or
+ship JavaScript config.
+
 | Layer         | Owner                                       | Lifetime           |
 | ------------- | ------------------------------------------- | ------------------ |
 | `instruction` | `cfg.system`                                | per session        |

@@ -4,23 +4,22 @@ import { join, resolve } from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
 
-const HARNESS_CONFIG_TS = `// harness.config.ts — example. The CLI does not yet auto-load this file;
-// it documents the shape you'd pass to runSession() from your own SDK code.
-import {
-  createBuiltinRegistry,
-  PolicyEngine,
-  defaultPolicy,
-  createBuiltinSensors,
-  type SessionConfig,
-} from "harness-lab";
-
+const HARNESS_CONFIG_MJS = `// harness.config.mjs — auto-loaded by \`harness chat\`, \`harness run\`, and \`harness tools\`.
 export default {
-  // Pick your provider/model in CLI flags; this file describes the
-  // tool/policy/sensor surface the agent runs against.
-  tools: createBuiltinRegistry(),
-  policy: new PolicyEngine({ rules: defaultPolicy }),
-  sensors: createBuiltinSensors(),
-} satisfies Partial<SessionConfig>;
+  // CLI flags still choose provider/model/permission mode.
+  // This file describes project-specific overrides.
+  //
+  // Defaults already include built-in tools, default policy rules, and
+  // typecheck/lint/test sensors. Uncomment only what this project needs.
+  //
+  // system: "Project-specific system prompt override.",
+  // maxToolsPerUserTurn: 25,
+  // maxSubagentDepth: 1,
+  mcpServers: [
+    // Example:
+    // { name: "filesystem", command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "."] },
+  ],
+};
 `;
 
 const AGENTS_MD = `# Project guide for the agent
@@ -52,13 +51,13 @@ type Force = { force?: boolean };
 
 export function initCommand(): Command {
   return new Command("init")
-    .description("Scaffold harness.config.ts, AGENTS.md and .harness/ in the cwd")
+    .description("Scaffold harness.config.mjs, AGENTS.md and .harness/ in the cwd")
     .option("-C, --cwd <path>", "Where to scaffold (default: current dir)")
     .option("-f, --force", "Overwrite files that already exist")
     .action(async (opts: Force & { cwd?: string }) => {
       const root = resolve(opts.cwd ?? process.cwd());
       const targets: { rel: string; body: string }[] = [
-        { rel: "harness.config.ts", body: HARNESS_CONFIG_TS },
+        { rel: "harness.config.mjs", body: HARNESS_CONFIG_MJS },
         { rel: "AGENTS.md", body: AGENTS_MD },
         { rel: ".harness/runs/.gitignore", body: HARNESS_GITIGNORE },
       ];

@@ -6,7 +6,7 @@ policy-gated tools, environment sensors, hooks, an MCP client, isolated
 sub-agents, and a deterministic JSONL event log for every run.
 
 ```
-harness init                          # scaffold harness.config.ts + AGENTS.md
+harness init                          # scaffold harness.config.mjs + AGENTS.md
 harness doctor                        # check node + API keys + write perms
 harness run "fix the typo in greet.js, then run it"
 harness inspect latest                # read the timeline back
@@ -87,8 +87,11 @@ Full sequence diagrams and design notes live in
   as a stub. Triggers: `after_tool`, `after_turn`, `final`.
   ([ADR-004](docs/adr/004-context-layers.md))
 - **MCP client** — connects to stdio MCP servers and registers their tools as
-  `mcp__<server>__<tool>` in the same registry as builtins. The model doesn't
-  know which is which.
+  `mcp__<server>__<tool>` from `harness.config.mjs` in the same registry as
+  builtins. The model doesn't know which is which.
+- **Config loader** — `harness.config.mjs` / `.js` / `.cjs` can override
+  system prompt, policy rules, hooks, sensors, tool registry, subagent limits,
+  and MCP servers. TypeScript configs are intentionally not runtime-loaded.
 - **Sub-agents** — `subagent` tool spawns a child session with a filtered
   registry (no recursion), shared sink/policy/hooks, fresh conversation. Result
   comes back as a string. Depth-limited.
@@ -132,7 +135,7 @@ node /path/to/harness-lab/dist/cli/main.js inspect latest
 For development:
 
 ```bash
-pnpm test            # unit + integration (53 tests)
+pnpm test            # unit + integration (63 tests)
 pnpm typecheck
 pnpm lint
 ```

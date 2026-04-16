@@ -5,6 +5,12 @@ import pc from "picocolors";
 import { createAnthropicAdapter } from "../adapters/anthropic.js";
 import { createOpenAIAdapter } from "../adapters/openai.js";
 import { loadAgentsMd } from "../config/agents-md.js";
+import {
+  loadHarnessConfig,
+  type HarnessConfig,
+  type LoadedHarnessConfig,
+} from "../config/harness-config.js";
+import { McpHub } from "../mcp/client.js";
 import { defaultPolicy } from "../policy/defaults.js";
 import { PolicyEngine, type AskPrompt } from "../policy/engine.js";
 import { createBuiltinSensors } from "../sensors/builtin.js";
@@ -32,14 +38,59 @@ export function buildSensors(): Sensor[] {
   return createBuiltinSensors();
 }
 
-export function buildPolicy(mode: PermissionMode, ask: AskPrompt): PolicyEngine {
-  return new PolicyEngine({ rules: defaultPolicy, mode, ask });
+export function buildPolicy(
+  mode: PermissionMode,
+  ask: AskPrompt,
+  config: HarnessConfig = {},
+): PolicyEngine {
+  return (
+    config.policy ?? new PolicyEngine({ rules: config.policyRules ?? defaultPolicy, mode, ask })
+  );
 }
 
 export async function composeSystemPrompt(system: string, cwd: string): Promise<string> {
   const projectGuide = await loadAgentsMd(cwd);
   if (!projectGuide) return system;
   return `${system}\n\n<project-guide>\n${projectGuide}\n</project-guide>`;
+}
+
+export async function loadCliConfig(cwd: string, enabled: boolean): Promise<LoadedHarnessConfig> {
+  if (!enabled) return { path: null, config: {} };
+  return loadHarnessConfig(cwd);
+}
+
+export async function buildToolSurface(
+  config: HarnessConfig,
+  opts: { toolsEnabled: boolean; mcpEnabled: boolean },
+): Promise<{ tools?: ToolRegistry; close(): Promise<void> }> {
+  if (!opts.toolsEnabled) {
+    return {
+      async close() {
+        return undefined;
+      },
+    };
+  }
+
+  const tools = config.tools ?? buildRegistry();
+  const hub = new McpHub();
+  try {
+    if (opts.mcpEnabled) {
+      for (const server of config.mcpServers ?? []) {
+        await hub.connect(server);
+      }
+      hub.registerInto(tools);
+    }
+  } catch (err) {
+    await hub.close();
+    throw err;
+  }
+
+  return {
+    tools,
+    async close() {
+      await hub.close();
+    },
+  };
 }
 
 /** Ask the user via stdin whether to allow a tool call. */
