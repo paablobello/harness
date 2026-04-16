@@ -7,7 +7,7 @@ process.on("warning", (warning: Error & { code?: string }) => {
 });
 
 const { Command } = await import("commander");
-const { VERSION } = await import("../index.js");
+const { VERSION } = await import("../version.js");
 const { chatCommand } = await import("./chat.js");
 const { doctorCommand } = await import("./doctor.js");
 const { evalCommand } = await import("./eval.js");

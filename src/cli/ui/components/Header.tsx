@@ -63,7 +63,7 @@ export function Header({ session }: Props): ReactNode {
       </Box>
       {session.mode === "chat" && (
         <Box marginTop={1}>
-          <Text color={theme.textMuted}>/help for commands · Ctrl+C twice to quit</Text>
+          <Text color={theme.textMuted}>/help for commands · exit to quit · Ctrl+C twice</Text>
         </Box>
       )}
     </Box>
