@@ -16,12 +16,26 @@ import {
   composeSystemPrompt,
   loadCliConfig,
   permissionMode,
+  resolveProviderOpts,
   terminalAsk,
 } from "./shared.js";
+import {
+  printRunSummary,
+  printSensorResult,
+  printSessionHeader,
+  printDetailsState,
+  printSlashHelp,
+  printModel,
+  printShellCommandHint,
+  printStatus,
+  printToolCall,
+  printToolList,
+  printToolResult,
+} from "./ui.js";
 
 type ChatOptions = {
-  model: string;
-  provider: "anthropic" | "openai";
+  model?: string;
+  provider?: "anthropic" | "openai";
   system?: string;
   permissionMode?: string;
   config?: boolean;
@@ -35,8 +49,8 @@ const DEFAULT_SYSTEM = "You are a helpful coding assistant.";
 export function chatCommand(): Command {
   return new Command("chat")
     .description("Start an interactive chat session with the configured model")
-    .option("-m, --model <model>", "Model name", "claude-sonnet-4-5")
-    .option("-p, --provider <provider>", "Provider (anthropic|openai)", "anthropic")
+    .option("-m, --model <model>", "Model name")
+    .option("-p, --provider <provider>", "Provider (anthropic|openai)")
     .option("-s, --system <prompt>", "System prompt")
     .option("--permission-mode <mode>", "default | accept-edits | bypass | plan", "default")
     .option("--no-config", "Do not load harness.config.* from the workspace")
@@ -44,7 +58,8 @@ export function chatCommand(): Command {
     .option("--no-tools", "Disable built-in tools")
     .option("--no-sensors", "Disable built-in typecheck/lint/test sensors")
     .action(async (rawOpts: ChatOptions) => {
-      const adapter = buildAdapter(rawOpts);
+      const providerOpts = resolveProviderOpts(rawOpts);
+      const adapter = buildAdapter(providerOpts);
       const cwd = process.cwd();
       const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
@@ -58,9 +73,20 @@ export function chatCommand(): Command {
         toolsEnabled: rawOpts.tools !== false,
         mcpEnabled: rawOpts.mcp !== false,
       });
+      const mode = permissionMode(rawOpts.permissionMode);
+      const tools = toolSurface.tools?.list();
+      const uiState = { details: false };
 
-      printBanner(adapter, logPath, Boolean(toolSurface.tools));
-      if (loaded.path) console.log(pc.dim(`Config → ${loaded.path}`));
+      printSessionHeader({
+        mode: "chat",
+        adapter,
+        cwd,
+        logPath,
+        configPath: loaded.path,
+        permissionMode: mode,
+        withTools: Boolean(toolSurface.tools),
+        toolCount: tools?.length ?? 0,
+      });
 
       let assistantStarted = false;
       const summary = await (async () => {
@@ -70,7 +96,7 @@ export function chatCommand(): Command {
           rl = readline.createInterface({ input: process.stdin, output: process.stdout });
           const activeRl = rl;
           const policy = toolSurface.tools
-            ? buildPolicy(permissionMode(rawOpts.permissionMode), terminalAsk(activeRl), config)
+            ? buildPolicy(mode, terminalAsk(activeRl), config)
             : undefined;
           const sensors =
             rawOpts.sensors === false ? undefined : (config.sensors ?? buildSensors());
@@ -93,12 +119,17 @@ export function chatCommand(): Command {
               : {}),
             input: {
               async next() {
-                try {
-                  const line = await activeRl.question(pc.cyan("you> "));
-                  return line;
-                } catch {
-                  return null;
-                }
+                return readUserInput(activeRl, {
+                  adapter,
+                  cwd,
+                  logPath,
+                  configPath: loaded.path,
+                  permissionMode: mode,
+                  withTools: Boolean(toolSurface.tools),
+                  toolCount: tools?.length ?? 0,
+                  tools,
+                  uiState,
+                });
               },
             },
             onAssistantDelta: (text) => {
@@ -113,17 +144,13 @@ export function chatCommand(): Command {
               assistantStarted = false;
             },
             onToolCall: (call) => {
-              console.log(pc.blue(`  → ${call.name}`));
+              printToolCall(call, { details: uiState.details });
             },
             onToolResult: (res) => {
-              const tag = res.ok ? pc.green("ok") : pc.red("fail");
-              const preview = res.output.split("\n")[0]?.slice(0, 120) ?? "";
-              console.log(pc.dim(`  ← [${tag}] ${preview}`));
+              printToolResult(res, { details: uiState.details });
             },
             onSensorRun: (res) => {
-              const tag = res.ok ? pc.green("ok") : pc.red("fail");
-              const preview = res.message.split("\n")[0]?.slice(0, 120) ?? "";
-              console.log(pc.dim(`  ∴ sensor ${res.name} [${tag}] ${preview}`));
+              printSensorResult(res);
             },
           });
         } finally {
@@ -132,22 +159,88 @@ export function chatCommand(): Command {
         }
       })();
 
-      const cost = summary.totalCostUsd > 0 ? `$${summary.totalCostUsd.toFixed(4)}` : "n/a";
-      console.log(
-        pc.dim(
-          `\n[session] turns=${summary.turns} tokens=${summary.totalInputTokens}→${summary.totalOutputTokens} cost≈${cost}`,
-        ),
-      );
-      console.log(pc.dim(`[session] ${logPath}`));
+      printRunSummary("session", summary, logPath);
     });
 }
 
-function printBanner(adapter: ModelAdapter, logPath: string, withTools: boolean): void {
-  console.log(
-    pc.dim(
-      `Chat with ${adapter.name}:${adapter.model} (ctrl+D or ctrl+C to exit) ${withTools ? "[tools on]" : "[tools off]"}`,
-    ),
-  );
-  console.log(pc.dim(`Events → ${logPath}`));
-  console.log();
+type SlashContext = {
+  adapter: ModelAdapter;
+  cwd: string;
+  logPath: string;
+  configPath?: string | null;
+  permissionMode: ReturnType<typeof permissionMode>;
+  withTools: boolean;
+  toolCount: number;
+  tools?: { name: string; risk: string; source: string; description: string }[];
+  uiState: { details: boolean };
+};
+
+async function readUserInput(rl: readline.Interface, ctx: SlashContext): Promise<string | null> {
+  while (true) {
+    let line: string;
+    try {
+      line = await rl.question(pc.cyan("harness> "));
+    } catch {
+      return null;
+    }
+
+    const handled = handleLocalInput(line, ctx);
+    if (handled === "exit") return null;
+    if (handled === "handled") continue;
+    return line;
+  }
+}
+
+export function isExitInput(line: string): boolean {
+  return ["exit", "quit", "q"].includes(line.trim().toLowerCase());
+}
+
+export function isLikelyHarnessInvocation(line: string): boolean {
+  return /^harness(\s|$)/.test(line.trim());
+}
+
+function handleLocalInput(line: string, ctx: SlashContext): "send" | "handled" | "exit" {
+  const trimmed = line.trim();
+  if (isExitInput(trimmed)) return "exit";
+  if (isLikelyHarnessInvocation(trimmed)) {
+    printShellCommandHint(trimmed);
+    return "handled";
+  }
+  if (!trimmed.startsWith("/")) return "send";
+
+  const [command] = trimmed.split(/\s+/, 1);
+  switch (command) {
+    case "/help":
+    case "/?":
+      printSlashHelp();
+      return "handled";
+    case "/status":
+      printStatus(ctx);
+      return "handled";
+    case "/model":
+      printModel(ctx.adapter);
+      return "handled";
+    case "/tools":
+      printToolList(ctx.tools);
+      return "handled";
+    case "/details":
+      ctx.uiState.details = !ctx.uiState.details;
+      printDetailsState(ctx.uiState.details);
+      return "handled";
+    case "/log":
+      console.log(pc.dim(ctx.logPath));
+      return "handled";
+    case "/clear":
+      process.stdout.write("\x1Bc");
+      printSessionHeader({ mode: "chat", ...ctx });
+      return "handled";
+    case "/exit":
+    case "/quit":
+    case "/q":
+      return "exit";
+    default:
+      console.log(pc.yellow(`Unknown command: ${command}`));
+      console.log(pc.dim("Type /help for available commands."));
+      return "handled";
+  }
 }

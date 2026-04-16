@@ -4,7 +4,12 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildPolicy, buildToolSurface, composeSystemPrompt } from "../../src/cli/shared.js";
+import {
+  buildPolicy,
+  buildToolSurface,
+  composeSystemPrompt,
+  resolveProviderOpts,
+} from "../../src/cli/shared.js";
 import { createBuiltinRegistry } from "../../src/tools/builtin.js";
 
 describe("composeSystemPrompt", () => {
@@ -62,4 +67,34 @@ describe("CLI shared builders", () => {
 
     expect(decision).toEqual({ decision: "deny", reason: "no reads" });
   });
+
+  it("defaults to OpenAI's coding model when only OPENAI_API_KEY is set", () => {
+    const oldOpenAI = process.env["OPENAI_API_KEY"];
+    const oldAnthropic = process.env["ANTHROPIC_API_KEY"];
+    try {
+      process.env["OPENAI_API_KEY"] = "test";
+      delete process.env["ANTHROPIC_API_KEY"];
+
+      expect(resolveProviderOpts({})).toEqual({ provider: "openai", model: "gpt-5.4" });
+    } finally {
+      restoreEnv("OPENAI_API_KEY", oldOpenAI);
+      restoreEnv("ANTHROPIC_API_KEY", oldAnthropic);
+    }
+  });
+
+  it("chooses a provider-specific model when provider is explicit", () => {
+    expect(resolveProviderOpts({ provider: "openai" })).toEqual({
+      provider: "openai",
+      model: "gpt-5.4",
+    });
+    expect(resolveProviderOpts({ provider: "anthropic" })).toEqual({
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+    });
+  });
 });
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}

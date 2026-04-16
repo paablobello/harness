@@ -21,14 +21,33 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ModelAdapter, PermissionMode } from "../types.js";
 
 export type ProviderOpts = {
-  model: string;
-  provider: "anthropic" | "openai";
+  model?: string;
+  provider?: "anthropic" | "openai";
 };
 
 export function buildAdapter(opts: ProviderOpts): ModelAdapter {
-  if (opts.provider === "openai") return createOpenAIAdapter({ model: opts.model });
-  if (opts.provider === "anthropic") return createAnthropicAdapter({ model: opts.model });
-  throw new Error(`Unknown provider: ${opts.provider}`);
+  const resolved = resolveProviderOpts(opts);
+  if (resolved.provider === "openai") return createOpenAIAdapter({ model: resolved.model });
+  if (resolved.provider === "anthropic") return createAnthropicAdapter({ model: resolved.model });
+  throw new Error(`Unknown provider: ${resolved.provider}`);
+}
+
+export function resolveProviderOpts(opts: ProviderOpts): Required<ProviderOpts> {
+  const provider = opts.provider ?? defaultProvider();
+  return {
+    provider,
+    model: opts.model ?? defaultModel(provider),
+  };
+}
+
+function defaultProvider(): "anthropic" | "openai" {
+  if (process.env["OPENAI_API_KEY"] && !process.env["ANTHROPIC_API_KEY"]) return "openai";
+  return "anthropic";
+}
+
+function defaultModel(provider: "anthropic" | "openai"): string {
+  if (provider === "openai") return "gpt-5.4";
+  return "claude-sonnet-4-5";
 }
 
 export function buildRegistry(): ToolRegistry {

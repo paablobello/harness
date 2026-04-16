@@ -1,14 +1,20 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+process.noDeprecation = true;
 
-import { VERSION } from "../index.js";
-import { chatCommand } from "./chat.js";
-import { doctorCommand } from "./doctor.js";
-import { evalCommand } from "./eval.js";
-import { initCommand } from "./init.js";
-import { inspectCommand } from "./inspect.js";
-import { runCommand } from "./run.js";
-import { toolsCommand } from "./tools.js";
+process.on("warning", (warning: Error & { code?: string }) => {
+  if (warning.code === "DEP0040" && warning.message.includes("punycode")) return;
+  console.warn(warning.stack ?? `${warning.name}: ${warning.message}`);
+});
+
+const { Command } = await import("commander");
+const { VERSION } = await import("../index.js");
+const { chatCommand } = await import("./chat.js");
+const { doctorCommand } = await import("./doctor.js");
+const { evalCommand } = await import("./eval.js");
+const { initCommand } = await import("./init.js");
+const { inspectCommand } = await import("./inspect.js");
+const { runCommand } = await import("./run.js");
+const { toolsCommand } = await import("./tools.js");
 
 const program = new Command();
 
@@ -19,7 +25,7 @@ program
 
 program.addCommand(initCommand());
 program.addCommand(doctorCommand());
-program.addCommand(chatCommand());
+program.addCommand(chatCommand(), { isDefault: true });
 program.addCommand(runCommand());
 program.addCommand(toolsCommand());
 program.addCommand(inspectCommand());
@@ -29,3 +35,5 @@ program.parseAsync().catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });
+
+export {};

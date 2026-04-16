@@ -15,12 +15,20 @@ import {
   composeSystemPrompt,
   loadCliConfig,
   permissionMode,
+  resolveProviderOpts,
   terminalAsk,
 } from "./shared.js";
+import {
+  printRunSummary,
+  printSensorResult,
+  printSessionHeader,
+  printToolCall,
+  printToolResult,
+} from "./ui.js";
 
 type RunOptions = {
-  model: string;
-  provider: "anthropic" | "openai";
+  model?: string;
+  provider?: "anthropic" | "openai";
   system?: string;
   cwd?: string;
   permissionMode?: string;
@@ -38,8 +46,8 @@ export function runCommand(): Command {
   return new Command("run")
     .description("Run a one-shot task non-interactively")
     .argument("<task...>", "Task description to hand to the agent")
-    .option("-m, --model <model>", "Model name", "claude-sonnet-4-5")
-    .option("-p, --provider <provider>", "Provider (anthropic|openai)", "anthropic")
+    .option("-m, --model <model>", "Model name")
+    .option("-p, --provider <provider>", "Provider (anthropic|openai)")
     .option("-s, --system <prompt>", "System prompt override")
     .option("-C, --cwd <path>", "Workspace / working dir (default: current dir)")
     .option("--permission-mode <mode>", "default | accept-edits | bypass | plan", "default")
@@ -49,7 +57,8 @@ export function runCommand(): Command {
     .action(async (taskParts: string[], rawOpts: RunOptions) => {
       const task = taskParts.join(" ");
       const cwd = resolve(rawOpts.cwd ?? process.cwd());
-      const adapter = buildAdapter(rawOpts);
+      const providerOpts = resolveProviderOpts(rawOpts);
+      const adapter = buildAdapter(providerOpts);
       const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
       const system = await composeSystemPrompt(
@@ -62,10 +71,19 @@ export function runCommand(): Command {
         toolsEnabled: true,
         mcpEnabled: rawOpts.mcp !== false,
       });
+      const mode = permissionMode(rawOpts.permissionMode);
+      const tools = toolSurface.tools?.list();
 
-      console.log(pc.dim(`run: ${adapter.name}:${adapter.model} cwd=${cwd}`));
-      if (loaded.path) console.log(pc.dim(`config → ${loaded.path}`));
-      console.log(pc.dim(`events → ${logPath}\n`));
+      printSessionHeader({
+        mode: "run",
+        adapter,
+        cwd,
+        logPath,
+        configPath: loaded.path,
+        permissionMode: mode,
+        withTools: Boolean(toolSurface.tools),
+        toolCount: tools?.length ?? 0,
+      });
 
       let delivered = false;
       let assistantStarted = false;
@@ -75,11 +93,7 @@ export function runCommand(): Command {
         try {
           const sink = await FileEventSink.open(logPath);
           rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-          const policy = buildPolicy(
-            permissionMode(rawOpts.permissionMode),
-            terminalAsk(rl),
-            config,
-          );
+          const policy = buildPolicy(mode, terminalAsk(rl), config);
           const sensors =
             rawOpts.sensors === false ? undefined : (config.sensors ?? buildSensors());
 
@@ -119,17 +133,13 @@ export function runCommand(): Command {
               assistantStarted = false;
             },
             onToolCall: (call) => {
-              console.log(pc.blue(`  → ${call.name}`));
+              printToolCall(call);
             },
             onToolResult: (res) => {
-              const tag = res.ok ? pc.green("ok") : pc.red("fail");
-              const preview = res.output.split("\n")[0]?.slice(0, 120) ?? "";
-              console.log(pc.dim(`  ← [${tag}] ${preview}`));
+              printToolResult(res);
             },
             onSensorRun: (res) => {
-              const tag = res.ok ? pc.green("ok") : pc.red("fail");
-              const preview = res.message.split("\n")[0]?.slice(0, 120) ?? "";
-              console.log(pc.dim(`  ∴ sensor ${res.name} [${tag}] ${preview}`));
+              printSensorResult(res);
             },
           });
         } finally {
@@ -138,12 +148,6 @@ export function runCommand(): Command {
         }
       })();
 
-      const cost = summary.totalCostUsd > 0 ? `$${summary.totalCostUsd.toFixed(4)}` : "n/a";
-      console.log(
-        pc.dim(
-          `\n[run] turns=${summary.turns} tokens=${summary.totalInputTokens}→${summary.totalOutputTokens} cost≈${cost}`,
-        ),
-      );
-      console.log(pc.dim(`[run] ${logPath}`));
+      printRunSummary("run", summary, logPath);
     });
 }
