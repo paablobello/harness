@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { HookDispatcher, HookPayload } from "../hooks/dispatcher.js";
+import type { HookDispatcher, HookPayload, HookPayloadBase } from "../hooks/dispatcher.js";
 import type { PolicyEngine } from "../policy/engine.js";
 import type { Sensor, SensorContext } from "../sensors/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -61,16 +61,17 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
     session_id: sessionId,
     run_id: runId,
   });
-  const hookBase = (event: HookPayload["hook_event_name"]): Pick<
-    HookPayload,
-    "session_id" | "run_id" | "cwd" | "timestamp" | "hook_event_name"
-  > => ({
-    session_id: sessionId,
-    run_id: runId,
-    cwd: cfg.cwd,
-    timestamp: now(),
-    hook_event_name: event,
-  });
+  function hookBase<E extends HookPayload["hook_event_name"]>(
+    event: E,
+  ): HookPayloadBase & { hook_event_name: E } {
+    return {
+      session_id: sessionId,
+      run_id: runId,
+      cwd: cfg.cwd,
+      timestamp: now(),
+      hook_event_name: event,
+    };
+  }
 
   cfg.sink.write({
     ...base(),
