@@ -1,0 +1,16 @@
+{
+  "name": "create-fizzbuzz",
+  "task": "Create fizzbuzz.js with a function fizzbuzz(n) that prints FizzBuzz for 1..n. Then add a node-runnable bottom block that calls fizzbuzz(15).",
+  "permissionMode": "bypassPermissions",
+  "assertions": {
+    "filesExist": ["fizzbuzz.js"],
+    "fileContains": [
+      { "path": "fizzbuzz.js", "matches": ["function", "Fizz", "Buzz"] }
+    ],
+    "command": {
+      "cmd": "node fizzbuzz.js",
+      "stdoutContains": ["FizzBuzz"]
+    },
+    "maxToolCalls": 10
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "fix-typo-in-greeting",
+  "task": "Fix the typo in greeting.js — 'Helo' should be 'Hello'. Then run it.",
+  "permissionMode": "bypassPermissions",
+  "setup": {
+    "files": {
+      "greeting.js": "console.log('Helo, world');\n"
+    }
+  },
+  "assertions": {
+    "fileContains": [
+      { "path": "greeting.js", "matches": ["Hello, world"] }
+    ],
+    "command": {
+      "cmd": "node greeting.js",
+      "stdoutContains": ["Hello, world"]
+    },
+    "maxToolCalls": 6
+  }
+}
