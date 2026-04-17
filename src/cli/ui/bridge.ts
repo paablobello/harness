@@ -13,7 +13,7 @@ import type { ModelAdapter, PermissionMode } from "../../types.js";
 
 import { App, type AppCallbacks } from "./App.js";
 import { loadHistory } from "./history.js";
-import { loadPreferences } from "./preferences.js";
+import { detectTerminalTheme, loadPreferences } from "./preferences.js";
 import type { Action, SessionMeta } from "./state.js";
 
 const EXIT_SIGNAL = "\x00__HARNESS_EXIT__\x00";
@@ -127,7 +127,7 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
 
   const appElement = createElement(App, {
     session,
-    initialTheme: prefs.theme ?? "dark",
+    initialTheme: prefs.theme ?? detectTerminalTheme(),
     history,
     tools: toolList,
     callbacks,

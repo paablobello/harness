@@ -31,3 +31,22 @@ export async function savePreferences(prefs: UiPreferences): Promise<void> {
     // Best effort: do not throw if the prefs file cannot be written.
   }
 }
+
+/**
+ * Guesses whether the terminal has a dark or light background.
+ *
+ * Reads COLORFGBG (e.g. "15;0" = white text on black bg; "0;15" = black on white)
+ * which is set by most modern terminals (xterm, iTerm2, VTE-based). Falls back to
+ * "dark" when undetectable because that's the overwhelmingly common case.
+ */
+export function detectTerminalTheme(): "dark" | "light" {
+  const raw = process.env["COLORFGBG"];
+  if (!raw) return "dark";
+  const parts = raw.split(";");
+  const bg = parts[parts.length - 1];
+  if (!bg) return "dark";
+  const n = Number.parseInt(bg, 10);
+  if (Number.isNaN(n)) return "dark";
+  // ANSI palette: 0-6 and 8 are dark shades; 7 and 9-15 are light.
+  return n === 7 || n >= 9 ? "light" : "dark";
+}

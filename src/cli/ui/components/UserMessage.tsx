@@ -8,13 +8,13 @@ export function UserMessage({ msg }: { msg: UserMsg }): ReactNode {
   const theme = useTheme();
   const lines = msg.text.split("\n");
   return (
-    <Box flexDirection="row" marginBottom={1}>
-      <Text color={theme.user} bold>
-        {"› "}
-      </Text>
+    <Box marginBottom={1}>
+      <Text color={theme.textMuted}>{"> "}</Text>
       <Box flexDirection="column">
         {lines.map((line, i) => (
-          <Text key={i}>{line}</Text>
+          <Text key={i} color={theme.user}>
+            {line || " "}
+          </Text>
         ))}
       </Box>
     </Box>

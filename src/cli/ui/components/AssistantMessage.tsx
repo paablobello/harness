@@ -14,21 +14,24 @@ type Props = {
 export function AssistantMessage({ msg, adapter }: Props): ReactNode {
   const theme = useTheme();
   const renderMarkdown = !msg.streaming && msg.text.length > 0;
-  return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text color={theme.assistant} bold>
-          {adapter}
-        </Text>
-        <Text color={theme.textMuted}>{" › "}</Text>
-        {msg.streaming && (
-          <>
-            <Spinner color={theme.toolRunning} />
-            <Text color={theme.textMuted}> streaming…</Text>
-          </>
-        )}
+
+  if (msg.streaming && !msg.text) {
+    return (
+      <Box marginBottom={1}>
+        <Spinner color={theme.toolRunning} />
+        <Text color={theme.textMuted}> {adapter} thinking…</Text>
       </Box>
-      <Box flexDirection="column" marginLeft={2}>
+    );
+  }
+
+  return (
+    <Box marginBottom={1} flexDirection="row">
+      <Box marginRight={1}>
+        <Text color={theme.assistant} bold>
+          ●
+        </Text>
+      </Box>
+      <Box flexDirection="column">
         {renderMarkdown ? <Markdown text={msg.text} /> : <StreamingText text={msg.text} />}
       </Box>
     </Box>
@@ -41,7 +44,7 @@ function StreamingText({ text }: { text: string }): ReactNode {
   return (
     <>
       {lines.map((line, i) => (
-        <Text key={i}>{line}</Text>
+        <Text key={i}>{line || " "}</Text>
       ))}
     </>
   );

@@ -100,7 +100,25 @@ describe("SuggestionsPanel", () => {
 });
 
 describe("AssistantMessage", () => {
-  it("renders streamed text while still streaming", () => {
+  it("shows a 'thinking' hint with the adapter when streaming starts empty", () => {
+    const { lastFrame } = render(
+      <AssistantMessage
+        msg={{
+          kind: "assistant",
+          id: "a1",
+          text: "",
+          streaming: true,
+          turn: 1,
+        }}
+        adapter="fake"
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("fake");
+    expect(frame).toContain("thinking");
+  });
+
+  it("streams text inline with the assistant bullet", () => {
     const { lastFrame } = render(
       <AssistantMessage
         msg={{
@@ -114,7 +132,7 @@ describe("AssistantMessage", () => {
       />,
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("fake");
+    expect(frame).toContain("●");
     expect(frame).toContain("Thinking");
   });
 

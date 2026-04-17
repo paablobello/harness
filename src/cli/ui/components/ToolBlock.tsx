@@ -7,7 +7,7 @@ import { useTheme, type Theme } from "../theme.js";
 import { DiffView } from "./DiffView.js";
 import { Spinner } from "./Spinner.js";
 
-const DEFAULT_MAX_LINES = 10;
+const DEFAULT_MAX_LINES = 8;
 
 type Props = {
   readonly msg: ToolMsg;
@@ -17,49 +17,36 @@ type Props = {
 
 export function ToolBlock({ msg, focused, details }: Props): ReactNode {
   const theme = useTheme();
-  const borderColor = focused ? theme.borderFocus : theme.border;
   const expanded = msg.expanded || details;
-  const statusColor = colorForStatus(msg.status, theme);
+  const summary = formatInputSummary(msg.name, msg.input);
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={borderColor}
-      borderDimColor={!focused}
-      paddingX={1}
-      marginBottom={1}
-    >
+    <Box flexDirection="column" marginBottom={1}>
       <Box>
         <StatusBadge status={msg.status} />
         <Text> </Text>
-        <Text bold color={theme.tool}>
+        <Text color={focused ? theme.primary : theme.text} bold={focused}>
           {msg.name}
         </Text>
-        <Text color={theme.textMuted}>
-          {formatInputSummary(msg.name, msg.input)
-            ? `  ${formatInputSummary(msg.name, msg.input)}`
-            : ""}
-        </Text>
-        {msg.status !== "running" && msg.status !== "pending" && msg.durationMs !== undefined && (
-          <Text color={theme.textMuted}> · {formatDuration(msg.durationMs)}</Text>
+        {summary && (
+          <>
+            <Text color={theme.textMuted}>{"  "}</Text>
+            <Text color={theme.textMuted}>{summary}</Text>
+          </>
         )}
+        {msg.status === "ok" || msg.status === "fail"
+          ? msg.durationMs !== undefined && (
+              <Text color={theme.textMuted}>{"  "}({formatDuration(msg.durationMs)})</Text>
+            )
+          : null}
       </Box>
       {details && (
-        <Box marginTop={1} flexDirection="column">
-          <Text color={theme.textMuted}>input</Text>
+        <Box marginLeft={2} flexDirection="column">
           <Text color={theme.textMuted}>{safeJson(msg.input)}</Text>
         </Box>
       )}
       {(msg.status === "ok" || msg.status === "fail") && (
-        <ToolOutput msg={msg} expanded={expanded} statusColor={statusColor} />
-      )}
-      {focused && (
-        <Box marginTop={1}>
-          <Text color={theme.textMuted}>
-            Ctrl+O {msg.expanded ? "collapse" : "expand"} · Shift+Tab focus next
-          </Text>
-        </Box>
+        <ToolOutput msg={msg} expanded={expanded} statusColor={colorForStatus(msg.status, theme)} />
       )}
     </Box>
   );
@@ -76,33 +63,31 @@ function ToolOutput({
 }): ReactNode {
   const theme = useTheme();
   const output = msg.output;
-  if (!output) {
-    return (
-      <Box>
-        <Text color={theme.textMuted}>(no output)</Text>
-      </Box>
-    );
-  }
+  if (!output) return null;
 
   if (msg.status === "fail") {
     const allLines = output.split("\n");
     const visible = expanded ? allLines : allLines.slice(0, 2);
     const rest = allLines.length - visible.length;
     return (
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column" marginLeft={2}>
         {visible.map((line, i) => (
           <Text key={i} color={statusColor}>
             {line || " "}
           </Text>
         ))}
-        {rest > 0 && <Text color={theme.textMuted}>… +{rest} more lines (Ctrl+O to expand)</Text>}
+        {rest > 0 && (
+          <Text color={theme.textMuted}>
+            … +{rest} more lines (Ctrl+O to expand)
+          </Text>
+        )}
       </Box>
     );
   }
 
   if (isDiffOutput(msg)) {
     return (
-      <Box marginTop={1}>
+      <Box marginLeft={2}>
         <DiffView diff={output} expanded={expanded} />
       </Box>
     );
@@ -117,9 +102,11 @@ function ToolOutput({
   const renderedLines = highlighted.split("\n");
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginLeft={2}>
       {renderedLines.map((line, i) => (
-        <Text key={i}>{line || " "}</Text>
+        <Text key={i} color={theme.textMuted}>
+          {line || " "}
+        </Text>
       ))}
       {rest > 0 && (
         <Text color={theme.textMuted}>
@@ -134,21 +121,13 @@ function StatusBadge({ status }: { status: ToolMsg["status"] }): ReactNode {
   const theme = useTheme();
   switch (status) {
     case "pending":
-      return <Text color={theme.textMuted}>◌</Text>;
+      return <Text color={theme.textMuted}>○</Text>;
     case "running":
       return <Spinner color={theme.toolRunning} />;
     case "ok":
-      return (
-        <Text color={theme.success} bold>
-          ✔
-        </Text>
-      );
+      return <Text color={theme.success}>●</Text>;
     case "fail":
-      return (
-        <Text color={theme.error} bold>
-          ✖
-        </Text>
-      );
+      return <Text color={theme.error}>●</Text>;
     default:
       return <Text>·</Text>;
   }
@@ -165,17 +144,17 @@ export function formatInputSummary(tool: string, input: unknown): string {
   if (input && typeof input === "object") {
     const o = input as Record<string, unknown>;
     if (tool === "run_command" && typeof o["command"] === "string") {
-      return `$ ${truncateLine(o["command"], 180)}`;
+      return `$ ${truncateLine(o["command"], 120)}`;
     }
     if (typeof o["path"] === "string") return o["path"];
     if (typeof o["pattern"] === "string") return `/${o["pattern"]}/`;
     if (tool === "apply_patch" && typeof o["patch"] === "string") {
       return `${countPatchFiles(o["patch"])} file(s)`;
     }
-    if (typeof o["prompt"] === "string") return truncateLine(o["prompt"], 120);
+    if (typeof o["prompt"] === "string") return truncateLine(o["prompt"], 100);
   }
   try {
-    return truncateLine(JSON.stringify(input) ?? "", 180);
+    return truncateLine(JSON.stringify(input) ?? "", 120);
   } catch {
     return "";
   }

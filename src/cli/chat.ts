@@ -279,6 +279,7 @@ function handleLocalInput(line: string, ctx: SlashContext): "send" | "handled" |
 
   const [command] = trimmed.split(/\s+/, 1);
   switch (command) {
+    case "/":
     case "/help":
     case "/?":
       printSlashHelp();

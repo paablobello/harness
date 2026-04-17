@@ -6,16 +6,16 @@ import { useTheme } from "../theme.js";
 
 export function SensorLine({ msg }: { msg: SensorMsg }): ReactNode {
   const theme = useTheme();
+  const icon = msg.ok ? "✔" : "✖";
   const color = msg.ok ? theme.success : theme.error;
-  const preview = firstLine(msg.message, 140);
+  const preview = firstLine(msg.message, 120);
   return (
     <Box marginBottom={1}>
-      <Text color={theme.textMuted}>sensor </Text>
-      <Text color={color} bold>
-        {msg.ok ? "ok" : "fail"}
+      <Text color={color}>{icon} </Text>
+      <Text color={theme.textMuted}>
+        sensor {msg.name}
+        {preview ? ` · ${preview}` : ""}
       </Text>
-      <Text> {msg.name}</Text>
-      {preview && <Text color={theme.textMuted}> · {preview}</Text>}
     </Box>
   );
 }

@@ -133,6 +133,11 @@ export function filterCommands(input: string): readonly SlashCommand[] {
 export function dispatchSlash(line: string, ctx: SlashCommandContext): boolean {
   const trimmed = line.trim();
   if (!trimmed.startsWith("/")) return false;
+  // Bare "/" with nothing after it: show help rather than complain.
+  if (trimmed === "/") {
+    ctx.dispatch({ type: "OPEN_OVERLAY", overlay: { type: "help" } });
+    return true;
+  }
   const firstSpace = trimmed.indexOf(" ");
   const head = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
   const args = firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1);

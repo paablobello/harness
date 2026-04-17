@@ -204,16 +204,26 @@ export function InputPrompt({
     resetInput();
   }, [currentText, onSubmit, resetInput, slashCtx]);
 
-  const completeSlash = useCallback(() => {
-    const chosen = suggestions[activeSuggestion];
-    if (!chosen) return;
-    const newText = chosen.acceptsArgs ? `${chosen.title} ` : chosen.title;
-    const newLines = [newText];
-    setLines(newLines);
-    setRow(0);
-    setCol(newText.length);
-    setActiveSuggestion(0);
-  }, [suggestions, activeSuggestion]);
+  const completeSlash = useCallback(
+    (execute = false): boolean => {
+      const chosen = suggestions[activeSuggestion];
+      if (!chosen) return false;
+      if (execute && !chosen.acceptsArgs) {
+        dispatchSlash(chosen.title, slashCtx);
+        void appendHistory(chosen.title);
+        resetInput();
+        return true;
+      }
+      const newText = chosen.acceptsArgs ? `${chosen.title} ` : chosen.title;
+      const newLines = [newText];
+      setLines(newLines);
+      setRow(0);
+      setCol(newText.length);
+      setActiveSuggestion(0);
+      return true;
+    },
+    [suggestions, activeSuggestion, slashCtx, resetInput],
+  );
 
   const openExternalEditor = useCallback(async () => {
     if (editorRef.current) return;
@@ -357,6 +367,14 @@ export function InputPrompt({
           setCol(0);
           return;
         }
+        // When the slash panel is open and the text isn't already an exact command,
+        // Enter selects/executes the active suggestion (Claude Code / Codex CLI behaviour).
+        if (isSlashMode && suggestions.length > 0) {
+          const exact = suggestions.find((c) => c.title === trimmed);
+          if (!exact) {
+            if (completeSlash(true)) return;
+          }
+        }
         submit();
         return;
       }
@@ -434,7 +452,7 @@ export function InputPrompt({
             lines={lines}
             row={row}
             col={col}
-            placeholder={disabled ? "Working…" : "Type a message, / for commands"}
+            placeholder={disabled ? "working…" : "Type a message, / for commands"}
             disabled={disabled}
           />
           {suggestions.length > 0 && (
@@ -442,9 +460,7 @@ export function InputPrompt({
           )}
           {!disabled && lines.length === 1 && lines[0] === "" && (
             <Box paddingX={1}>
-              <Text color={theme.textMuted}>
-                Enter send · \ + Enter newline · Ctrl+E editor · Ctrl+R history · Esc cancel
-              </Text>
+              <Text color={theme.textMuted}>? for shortcuts</Text>
             </Box>
           )}
         </>
@@ -480,7 +496,7 @@ function PromptBody({
       {showPlaceholder ? (
         <Box>
           <Text color={theme.primary} bold>
-            ›{" "}
+            {"› "}
           </Text>
           <Text color={theme.textMuted}>{placeholder}</Text>
         </Box>
@@ -490,7 +506,7 @@ function PromptBody({
           return (
             <Box key={i}>
               <Text color={theme.primary} bold>
-                {i === 0 ? "›" : "│"}{" "}
+                {i === 0 ? "› " : "  "}
               </Text>
               <RenderLine text={line} showCursor={isCursor} col={col} />
             </Box>
