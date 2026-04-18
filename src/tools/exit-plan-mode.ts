@@ -64,6 +64,21 @@ export const exitPlanModeTool: ToolDefinition<Input> = {
       };
     }
 
+    const shortfall = assessPlanQuality(args.plan);
+    if (shortfall) {
+      // Reject BEFORE bothering the user. Plan mode stays on, the model reads
+      // this as a tool_result and iterates. This is the "soft validation" that
+      // prevents drive-by plans in small repos.
+      return {
+        ok: false,
+        output:
+          `exit_plan_mode rejected the plan automatically (not shown to the user).\n\n${shortfall}\n\n` +
+          "Do more exploration (read_file / list_files / grep_files on the files you will " +
+          "touch), then call exit_plan_mode again with the missing sections filled in.",
+        meta: { approved: false, autoRejected: true },
+      };
+    }
+
     const decision = await ctx.askPlan({
       plan: args.plan,
       ...(args.allowed_tools ? { allowedTools: args.allowed_tools } : {}),
@@ -116,6 +131,48 @@ function timestampSlug(): string {
     `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
     `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
   );
+}
+
+/**
+ * Soft validation: returns a human-readable reason if the plan is too thin,
+ * or `null` if it looks acceptable. Deliberately lenient — we only want to
+ * catch obvious drive-bys (one-paragraph plans, no file paths, zero steps).
+ *
+ * Thresholds picked empirically from looking at Claude Code plan outputs:
+ * real plans for non-trivial changes routinely hit 200+ words, 3+ file refs,
+ * and 4+ numbered steps. The prompt describes a full 5-section shape, so
+ * anything obviously missing more than 2 of those dimensions gets kicked.
+ */
+function assessPlanQuality(plan: string): string | null {
+  const issues: string[] = [];
+  const words = plan.trim().split(/\s+/).filter(Boolean).length;
+  if (words < 120) issues.push(`plan is ${words} words — needs ~120+ for real depth`);
+
+  const pathRe =
+    /\b(?:[\w.@-]+\/)+[\w.@-]+\.(?:tsx?|jsx?|mjs|cjs|json|md|ya?ml|toml|py|rs|go|sh|css|html?)\b/g;
+  const paths = new Set<string>();
+  for (const m of plan.matchAll(pathRe)) paths.add(m[0]);
+  if (paths.size < 2)
+    issues.push(
+      `only ${paths.size} file path${paths.size === 1 ? "" : "s"} referenced — list the concrete files you will touch`,
+    );
+
+  const numberedSteps = (plan.match(/^\s*\d+\.\s+\S/gm) ?? []).length;
+  const bulletSteps = (plan.match(/^\s*[-*]\s+\S/gm) ?? []).length;
+  const steps = numberedSteps > 0 ? numberedSteps : bulletSteps;
+  if (steps < 3) issues.push(`only ${steps} step${steps === 1 ? "" : "s"} — break the work down further`);
+
+  const lower = plan.toLowerCase();
+  const missingSections: string[] = [];
+  if (!/objective|goal/.test(lower)) missingSections.push("Objective");
+  if (!/verify|verification|test|typecheck/.test(lower)) missingSections.push("Verification");
+  if (!/risk|edge case|failure|concurrency|breaking/.test(lower))
+    missingSections.push("Risks / edge cases");
+  if (missingSections.length > 0)
+    issues.push(`no sign of section(s): ${missingSections.join(", ")}`);
+
+  if (issues.length < 2) return null; // Be lenient — require at least 2 smells.
+  return `Plan failed quality checks:\n- ${issues.join("\n- ")}`;
 }
 
 function extractSlug(plan: string): string {

@@ -31,6 +31,7 @@ export async function openInExternalEditor(opts: OpenEditorOptions): Promise<str
 
   try {
     opts.pauseInk?.();
+    clearTerminalForEditor();
     await new Promise<void>((resolve, reject) => {
       const child = spawn(editor, [file], { stdio: "inherit" });
       child.on("error", reject);
@@ -38,6 +39,7 @@ export async function openInExternalEditor(opts: OpenEditorOptions): Promise<str
     });
     return readFileSync(file, "utf8").replace(/\s+$/, "");
   } finally {
+    clearTerminalForEditor();
     opts.resumeInk?.();
     try {
       unlinkSync(file);
@@ -45,4 +47,9 @@ export async function openInExternalEditor(opts: OpenEditorOptions): Promise<str
       // best-effort tmp cleanup
     }
   }
+}
+
+function clearTerminalForEditor(): void {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write("\x1b[0m\x1b[?25h\x1b[2J\x1b[H");
 }

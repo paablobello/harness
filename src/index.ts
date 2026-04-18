@@ -11,6 +11,8 @@ export type {
   PlanDecision,
   PolicyDecision,
   PolicyRule,
+  ReasoningEffort,
+  ReasoningSpec,
   StopReason,
   ToolCall,
   ToolContext,

@@ -10,6 +10,7 @@ import type {
   ConversationMessage,
   ModelAdapter,
   PermissionMode,
+  ReasoningSpec,
   SpawnSubagent,
   SpawnSubagentOptions,
   SpawnSubagentResult,
@@ -93,6 +94,21 @@ export type SessionConfig = {
   }) => void;
   /** UI-provided plan approval prompt. Only wired when plan mode is enabled. */
   askPlan?: AskPlan;
+  /**
+   * Per-mode deliberative-thinking knob. When `permissionMode === "plan"` the
+   * session auto-injects `reasoning: { effort: "high" }` into every turn
+   * input — this is what makes plan mode actually "think harder" instead of
+   * just "block writes".
+   *
+   * Override any slot with `null` to disable reasoning even in plan mode.
+   * Defaults: `{ plan: { effort: "high" } }`, no reasoning in other modes.
+   */
+  reasoning?: {
+    plan?: ReasoningSpec | null;
+    default?: ReasoningSpec | null;
+    acceptEdits?: ReasoningSpec | null;
+    bypassPermissions?: ReasoningSpec | null;
+  };
   signal?: AbortSignal;
 };
 
@@ -129,6 +145,28 @@ export type RunSummary = {
   /** Last assistant message text emitted during the session (used by subagent results). */
   lastAssistantMessage: string;
 };
+
+/** Default per-mode reasoning policy. Plan mode thinks hard, other modes stay
+ *  silent so we don't pay reasoning tokens on routine turns. Users override
+ *  via `SessionConfig.reasoning`. */
+const DEFAULT_REASONING_BY_MODE: Record<PermissionMode, ReasoningSpec | null> = {
+  plan: { effort: "high" },
+  default: null,
+  acceptEdits: null,
+  bypassPermissions: null,
+};
+
+function resolveReasoningForMode(
+  mode: PermissionMode,
+  cfg: SessionConfig["reasoning"],
+): ReasoningSpec | null {
+  // Explicit null in user config disables reasoning; `undefined` falls back
+  // to the default for that mode.
+  const override = cfg?.[mode];
+  if (override === null) return null;
+  if (override !== undefined) return override;
+  return DEFAULT_REASONING_BY_MODE[mode];
+}
 
 const DEFAULT_SUBAGENT_SYSTEM =
   "You are a focused subagent spawned from a parent session. You have no memory of " +
@@ -623,10 +661,15 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         let stopReason: "end_turn" | "max_tokens" | "tool_use" | "error" = "end_turn";
         let errorMsg: string | undefined;
 
+        const reasoning = resolveReasoningForMode(
+          cfg.policy?.getMode() ?? "default",
+          cfg.reasoning,
+        );
         const turnInput = {
           system: cfg.system,
           messages,
           ...(toolSpecs && toolSpecs.length > 0 ? { tools: toolSpecs } : {}),
+          ...(reasoning ? { reasoning } : {}),
         };
 
         for await (const event of cfg.adapter.runTurn(turnInput, signal)) {

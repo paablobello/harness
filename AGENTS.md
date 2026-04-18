@@ -38,12 +38,37 @@ A read-only deliberation mode for large / ambiguous tasks. Toggle in the Ink UI
 with `Shift+Tab` (default ↔ plan). The `--permission-mode plan` CLI flag starts
 a session directly in plan mode.
 
-Enforcement is **hard**: while `mode === "plan"`, the `PolicyEngine`
-(`src/policy/engine.ts`) denies every tool whose `risk !== "read"`. The model
-cannot write files or run commands, even if it tries. Two built-in prompts
-(`src/runtime/plan-mode-prompts.ts`) are injected as `<system-reminder>`
-messages on the turns bracketing the transition, so the model knows *why* its
-writes would be denied and what it should do instead.
+Plan mode pulls three levers at once:
+
+1. **Hard enforcement.** While `mode === "plan"`, the `PolicyEngine`
+   (`src/policy/engine.ts`) denies every tool whose `risk !== "read"`. The
+   model cannot write files or run commands, even if it tries.
+2. **Elevated reasoning budget.** The session auto-injects
+   `reasoning: { effort: "high" }` into every `ModelTurnInput` while plan mode
+   is active (`src/runtime/session.ts` → `resolveReasoningForMode`). Adapter
+   translation:
+   - **Anthropic** → `thinking: { type: "enabled", budget_tokens: 16384 }`
+     on the existing `messages.create` stream (`max_tokens` auto-bumped past
+     the budget so the API doesn't reject).
+   - **OpenAI** → the adapter auto-routes reasoning-family models
+     (`gpt-5*`, `o1*`, `o3*`, `o4*`, `o5*`) to the **Responses API**
+     (`/v1/responses`) with `reasoning: { effort }` in the nested shape,
+     because `chat.completions` 400s on `reasoning_effort` when function
+     tools are present. Non-reasoning models (`gpt-4o` etc.) stay on
+     `chat.completions` with the reasoning param silently dropped. Force a
+     specific path with the adapter option `api: "chat" | "responses"
+     | "auto"` (default `"auto"`).
+   - Override per-mode via `SessionConfig.reasoning.plan` — `null` disables
+     it entirely.
+3. **Prompt contract.** `src/runtime/plan-mode-prompts.ts` ships an entry
+   `<system-reminder>` that (a) explains hard enforcement, (b) mandates at
+   least three read-only tool calls before `exit_plan_mode`, and (c) spells
+   out the required plan shape (Objective · Affected files · Approach +
+   alternatives · Steps · Risks · Verification). `exit_plan_mode` runs a
+   soft-validation on the submitted plan (word count, file-path refs, step
+   count, section signals) and auto-rejects thin plans before bothering the
+   user — the model reads the rejection reason as a tool result and
+   iterates.
 
 Workflow:
 

@@ -15,6 +15,7 @@ type Decision = {
 type Props = {
   readonly request: PlanRequest;
   readonly onResolve: (decision: Decision) => void;
+  readonly onEditorActiveChange?: (active: boolean) => void;
 };
 
 const PREVIEW_LINES = 22;
@@ -35,7 +36,11 @@ const PREVIEW_LINES = 22;
  *   editing → non-interactive while $EDITOR owns the TTY (status line only)
  *   feedback → free-text input · ↵ submit · Esc back to review
  */
-export function PlanApprovalDialog({ request, onResolve }: Props): ReactNode {
+export function PlanApprovalDialog({
+  request,
+  onResolve,
+  onEditorActiveChange,
+}: Props): ReactNode {
   const theme = useTheme();
   const { isRawModeSupported, setRawMode } = useStdin();
 
@@ -56,7 +61,9 @@ export function PlanApprovalDialog({ request, onResolve }: Props): ReactNode {
     if (editingRef.current) return;
     editingRef.current = true;
     setStage("editing");
+    onEditorActiveChange?.(true);
     try {
+      await waitForInkFrame();
       const next = await openInExternalEditor({
         initial: currentPlan,
         filename: "plan.md",
@@ -76,9 +83,10 @@ export function PlanApprovalDialog({ request, onResolve }: Props): ReactNode {
       // onPlanResolve if needed, but we don't surface one from here.
     } finally {
       editingRef.current = false;
+      onEditorActiveChange?.(false);
       setStage("review");
     }
-  }, [currentPlan, isRawModeSupported, setRawMode]);
+  }, [currentPlan, isRawModeSupported, onEditorActiveChange, setRawMode]);
 
   useInput(
     (input, key) => {
@@ -115,7 +123,7 @@ export function PlanApprovalDialog({ request, onResolve }: Props): ReactNode {
   );
 
   if (stage === "editing") {
-    return <EditingPlaceholder theme={theme} />;
+    return null;
   }
   if (stage === "feedback") {
     return <FeedbackStage theme={theme} plan={currentPlan} feedback={feedback} />;
@@ -193,23 +201,13 @@ function ReviewStage({
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Editing placeholder — shown while $EDITOR owns the TTY
+// Editing pause — $EDITOR owns the TTY
 // ────────────────────────────────────────────────────────────────────────────
 
-function EditingPlaceholder({ theme }: { readonly theme: Theme }): ReactNode {
-  const editor = process.env["EDITOR"] || process.env["VISUAL"] || "nano";
-  return (
-    <Box flexDirection="column" marginY={1}>
-      <Badge theme={theme} label="editing plan" color={theme.warning} />
-      <Box marginTop={0}>
-        <Text color={theme.textMuted}>
-          {"  "}opened <Text color={theme.accentSoft}>{editor}</Text>
-          <Text color={theme.textDim}>{" · "}</Text>
-          save and close the file to continue
-        </Text>
-      </Box>
-    </Box>
-  );
+function waitForInkFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 50);
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────────────

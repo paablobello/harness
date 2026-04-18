@@ -20,6 +20,20 @@ import type {
 } from "../../src/types.js";
 import { queuedInput } from "../fixtures/fake-adapter.js";
 
+/** Plan body that clears `exit_plan_mode`'s soft-validation. Keep in sync
+ *  with the similarly-named helper in tests/tools/exit-plan-mode.test.ts. */
+function validPlanText(title = "Refactor auth"): string {
+  return (
+    `# ${title}\n\n` +
+    "## Objective\nExtract the session helper so tRPC and Express share it.\n\n" +
+    "## Affected files\n- src/auth/middleware.ts\n- src/auth/session.ts\n- tests/auth/middleware.test.ts\n\n" +
+    "## Steps\n1. Create verifySession() in src/auth/session.ts\n" +
+    "2. Rewrite src/auth/middleware.ts around it\n3. Update tests\n\n" +
+    "## Risks\nCookie parsing order; request-scoped cache handles it.\n\n" +
+    "## Verification\nRun pnpm test auth and pnpm typecheck."
+  );
+}
+
 /**
  * Adapter that records every `turnInput` it was called with. Tests use the
  * snapshot of `messages` to assert the session injected the plan-mode
@@ -28,20 +42,23 @@ import { queuedInput } from "../fixtures/fake-adapter.js";
 function createRecordingAdapter(script: ModelEvent[][]): {
   adapter: ModelAdapter;
   seenMessages: ConversationMessage[][];
+  seenReasoning: (ModelTurnInput["reasoning"] | undefined)[];
 } {
   const seenMessages: ConversationMessage[][] = [];
+  const seenReasoning: (ModelTurnInput["reasoning"] | undefined)[] = [];
   let turn = 0;
   const adapter: ModelAdapter = {
     name: "fake",
     model: "fake-model",
     async *runTurn(input: ModelTurnInput): AsyncIterable<ModelEvent> {
       seenMessages.push(input.messages.map((m) => ({ ...m })));
+      seenReasoning.push(input.reasoning);
       const events = script[turn] ?? [];
       turn += 1;
       for (const ev of events) yield ev;
     },
   };
-  return { adapter, seenMessages };
+  return { adapter, seenMessages, seenReasoning };
 }
 
 describe("plan mode — session integration", () => {
@@ -178,8 +195,7 @@ describe("plan mode — session integration", () => {
       const tools = createBuiltinRegistry();
       const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
 
-      const planText =
-        "# Refactor auth\n\n1. Extract session token helper\n2. Update middleware\n3. Add tests";
+      const planText = validPlanText("Refactor auth");
 
       const { adapter, seenMessages } = createRecordingAdapter([
         [
@@ -247,7 +263,7 @@ describe("plan mode — session integration", () => {
             type: "tool_call",
             id: "c-exit-1",
             name: "exit_plan_mode",
-            input: { plan: "# Plan v1\n\nStep 1: do thing\nStep 2: other thing" },
+            input: { plan: validPlanText("Plan v1") },
           },
           { type: "usage", inputTokens: 1, outputTokens: 1 },
           { type: "stop", reason: "tool_use" },
@@ -286,6 +302,103 @@ describe("plan mode — session integration", () => {
 
       const modeChanged = sink.events.filter((e) => e.event === "PermissionModeChanged");
       expect(modeChanged).toHaveLength(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("auto-injects reasoning: { effort: 'high' } into turn input while in plan mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-reasoning-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const { adapter, seenReasoning } = createRecordingAdapter([
+        [
+          { type: "text_delta", text: "thinking..." },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        input: queuedInput(["think hard"]),
+      });
+
+      expect(seenReasoning[0]).toEqual({ effort: "high" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not inject reasoning by default in non-plan modes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-default-reasoning-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "default" });
+
+      const { adapter, seenReasoning } = createRecordingAdapter([
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        input: queuedInput(["hi"]),
+      });
+
+      expect(seenReasoning[0]).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("honors an explicit null override to disable reasoning in plan mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-reasoning-override-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const { adapter, seenReasoning } = createRecordingAdapter([
+        [
+          { type: "text_delta", text: "ok" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        reasoning: { plan: null },
+        input: queuedInput(["hi"]),
+      });
+
+      expect(seenReasoning[0]).toBeUndefined();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

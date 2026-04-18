@@ -6,6 +6,7 @@ import type {
   ModelAdapter,
   ModelEvent,
   ModelTurnInput,
+  ReasoningEffort,
   StopReason,
 } from "../types.js";
 
@@ -17,6 +18,14 @@ export type AnthropicAdapterOptions = {
 };
 
 const DEFAULT_MAX_TOKENS = 4096;
+
+/** Default Anthropic `thinking.budget_tokens` per effort level. Picked to
+ *  roughly match Claude Code's reported plan-mode budget (~16k on high). */
+const THINKING_BUDGETS: Record<Exclude<ReasoningEffort, "off">, number> = {
+  low: 2048,
+  medium: 8192,
+  high: 16384,
+};
 
 export function createAnthropicAdapter(opts: AnthropicAdapterOptions): ModelAdapter {
   const client = new Anthropic({
@@ -30,10 +39,18 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): ModelAdap
 
     async *runTurn(input: ModelTurnInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
       try {
+        const thinking = resolveThinking(input);
+        // Anthropic requires max_tokens > budget_tokens when thinking is on.
+        // We bump it automatically so callers don't have to know.
+        const requestedMax = input.maxTokens ?? opts.maxTokens ?? DEFAULT_MAX_TOKENS;
+        const maxTokens = thinking
+          ? Math.max(requestedMax, thinking.budget_tokens + 1024)
+          : requestedMax;
+
         const stream = await client.messages.create(
           {
             model: opts.model,
-            max_tokens: input.maxTokens ?? opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+            max_tokens: maxTokens,
             system: input.system,
             messages: toAnthropicMessages(input.messages),
             ...(input.tools && input.tools.length > 0
@@ -45,6 +62,7 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): ModelAdap
                   })),
                 }
               : {}),
+            ...(thinking ? { thinking } : {}),
             stream: true,
           },
           { signal },
@@ -119,6 +137,36 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): ModelAdap
       }
     },
   };
+}
+
+/**
+ * Translate our provider-agnostic `reasoning` spec into Anthropic's
+ * `thinking` param. Returns `null` when thinking should be disabled — either
+ * because the caller didn't ask for it or because they explicitly set
+ * `effort: "off"`.
+ *
+ * The return shape is an inline structural type (not the SDK's
+ * `Messages.ThinkingConfigEnabled`) on purpose: the SDK's namespace layout
+ * has shifted between versions and we don't want this file to break on
+ * routine SDK bumps. The two required fields (`type`, `budget_tokens`) are
+ * stable public API, documented since extended thinking shipped in Claude 3.7.
+ *
+ * Note: `thinking_delta` / `signature_delta` / `thinking` content-blocks
+ * returned by the API are currently dropped by the stream loop (the switch
+ * only handles `text_delta` / `input_json_delta` / `tool_use`). That's fine
+ * — we don't want to render chain-of-thought as assistant text. If a future
+ * UI wants to surface it, wire a new `ModelEvent.thinking_delta` there.
+ */
+function resolveThinking(
+  input: ModelTurnInput,
+): { type: "enabled"; budget_tokens: number } | null {
+  const r = input.reasoning;
+  if (!r) return null;
+  if (r.effort === "off") return null;
+  const budget =
+    r.budgetTokens ?? THINKING_BUDGETS[(r.effort ?? "medium") as keyof typeof THINKING_BUDGETS];
+  if (!budget || budget < 1024) return null;
+  return { type: "enabled", budget_tokens: budget };
 }
 
 type AnthropicContentBlockParam =

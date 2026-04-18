@@ -66,6 +66,7 @@ export function App(props: AppProps): ReactNode {
   const quitRef = useRef<number>(0);
   const exitSentRef = useRef(false);
   const [quitHint, setQuitHint] = useState(false);
+  const [externalEditorActive, setExternalEditorActive] = useState(false);
 
   useEffect(() => {
     props.register(dispatch);
@@ -106,7 +107,10 @@ export function App(props: AppProps): ReactNode {
     },
     {
       isActive:
-        state.overlay !== null && state.pendingPolicy === null && state.pendingPlan === null,
+        !externalEditorActive &&
+        state.overlay !== null &&
+        state.pendingPolicy === null &&
+        state.pendingPlan === null,
     },
   );
 
@@ -126,7 +130,10 @@ export function App(props: AppProps): ReactNode {
         // No-op: Tab is reserved for slash completion inside InputPrompt.
       }
     },
-    { isActive: state.pendingPolicy === null && state.pendingPlan === null },
+    {
+      isActive:
+        !externalEditorActive && state.pendingPolicy === null && state.pendingPlan === null,
+    },
   );
 
   const handleQuit = (): void => {
@@ -151,22 +158,29 @@ export function App(props: AppProps): ReactNode {
     },
     {
       isActive:
-        state.isTurnActive && state.pendingPolicy === null && state.pendingPlan === null,
+        !externalEditorActive &&
+        state.isTurnActive &&
+        state.pendingPolicy === null &&
+        state.pendingPlan === null,
     },
   );
 
   return (
     <ThemeProvider value={theme}>
       <Box flexDirection="column">
-        <Header session={state.session} />
-        <MessageList
-          messages={state.messages}
-          adapterName={state.session.adapter.name}
-          focusedToolId={state.focusedToolId}
-          details={state.details}
-        />
-        {state.overlay && <Overlay overlay={state.overlay} state={state} tools={props.tools} />}
-        {state.pendingPolicy && (
+        {!externalEditorActive && <Header session={state.session} />}
+        {!externalEditorActive && (
+          <MessageList
+            messages={state.messages}
+            adapterName={state.session.adapter.name}
+            focusedToolId={state.focusedToolId}
+            details={state.details}
+          />
+        )}
+        {!externalEditorActive && state.overlay && (
+          <Overlay overlay={state.overlay} state={state} tools={props.tools} />
+        )}
+        {!externalEditorActive && state.pendingPolicy && (
           <PolicyDialog
             request={state.pendingPolicy}
             onResolve={(allow) => {
@@ -181,13 +195,15 @@ export function App(props: AppProps): ReactNode {
         {state.pendingPlan && !state.pendingPolicy && (
           <PlanApprovalDialog
             request={state.pendingPlan}
+            onEditorActiveChange={setExternalEditorActive}
             onResolve={(decision) => {
+              setExternalEditorActive(false);
               dispatch({ type: "PLAN_RESOLVE" });
               props.callbacks.onPlanResolve(decision);
             }}
           />
         )}
-        {!state.shouldExit && state.session.mode === "chat" && (
+        {!externalEditorActive && !state.shouldExit && state.session.mode === "chat" && (
           <>
             <ActivityLine state={state} />
             <InputPrompt
@@ -201,8 +217,8 @@ export function App(props: AppProps): ReactNode {
             />
           </>
         )}
-        <StatusBar state={state} />
-        {quitHint && (
+        {!externalEditorActive && <StatusBar state={state} />}
+        {!externalEditorActive && quitHint && (
           <Box paddingX={1}>
             <Text color={theme.warning}>Press Ctrl+C again within 2s to exit.</Text>
           </Box>

@@ -22,11 +22,30 @@ export type ToolSpec = {
   inputSchema: unknown;
 };
 
+/** How hard should the model "think" before answering.
+ *  Maps to provider-specific knobs (Anthropic extended thinking, OpenAI
+ *  reasoning_effort). `off` disables thinking even if the adapter defaults
+ *  it on. */
+export type ReasoningEffort = "off" | "low" | "medium" | "high";
+
+export type ReasoningSpec = {
+  effort?: ReasoningEffort;
+  /**
+   * Anthropic-only override for `thinking.budget_tokens`. If omitted, the
+   * adapter maps `effort` → a sensible budget (low=2k, medium=8k, high=16k).
+   * Ignored by the OpenAI adapter.
+   */
+  budgetTokens?: number;
+};
+
 export type ModelTurnInput = {
   system: string;
   messages: ConversationMessage[];
   tools?: ToolSpec[];
   maxTokens?: number;
+  /** Provider-agnostic knob for deliberative thinking. Activated automatically
+   *  by the session when entering plan mode (see `SessionConfig.reasoning`). */
+  reasoning?: ReasoningSpec;
 };
 
 export type ModelEvent =
