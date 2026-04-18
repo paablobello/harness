@@ -82,7 +82,6 @@ describe("SuggestionsPanel", () => {
     const { lastFrame } = render(<SuggestionsPanel suggestions={suggestions} activeIndex={0} />);
     const frame = lastFrame() ?? "";
     expect(frame).toContain("/tools");
-    expect(frame).toContain("/theme");
     expect(frame).toContain("➤");
   });
 

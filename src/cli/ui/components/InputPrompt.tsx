@@ -367,9 +367,12 @@ export function InputPrompt({
           setCol(0);
           return;
         }
-        // When the slash panel is open and the text isn't already an exact command,
-        // Enter selects/executes the active suggestion (Claude Code / Codex CLI behaviour).
-        if (isSlashMode && suggestions.length > 0) {
+        // When the slash panel is open and the user hasn't typed a space yet
+        // (i.e. no args), Enter selects/executes the active suggestion.
+        // If they already typed args (space present), Enter submits as-is so
+        // `/theme dark` works.
+        const hasArgs = trimmed.includes(" ");
+        if (isSlashMode && suggestions.length > 0 && !hasArgs) {
           const exact = suggestions.find((c) => c.title === trimmed);
           if (!exact) {
             if (completeSlash(true)) return;
@@ -421,7 +424,49 @@ export function InputPrompt({
         deletePrev();
         return;
       }
-      if (input && !key.meta) {
+
+      // Readline-style kill/move bindings. Cmd+Delete on macOS is commonly
+      // rebound by terminals to Ctrl+U, so this also fixes the "types 'u'" bug.
+      if (key.ctrl && input === "u") {
+        setLines((prev) => {
+          const next = [...prev];
+          const cur = next[row] ?? "";
+          next[row] = cur.slice(col);
+          return next;
+        });
+        setCol(0);
+        return;
+      }
+      if (key.ctrl && input === "k") {
+        setLines((prev) => {
+          const next = [...prev];
+          const cur = next[row] ?? "";
+          next[row] = cur.slice(0, col);
+          return next;
+        });
+        return;
+      }
+      if (key.ctrl && input === "w") {
+        setLines((prev) => {
+          const next = [...prev];
+          const cur = next[row] ?? "";
+          const left = cur.slice(0, col).replace(/\S+\s*$/, "");
+          next[row] = left + cur.slice(col);
+          return next;
+        });
+        setCol((c) => {
+          const cur = lines[row] ?? "";
+          const left = cur.slice(0, c).replace(/\S+\s*$/, "");
+          return left.length;
+        });
+        return;
+      }
+      if (key.ctrl && input === "a") {
+        setCol(0);
+        return;
+      }
+
+      if (input && !key.meta && !key.ctrl) {
         insertChar(input);
       }
     },
@@ -487,9 +532,11 @@ function PromptBody({
 
   return (
     <Box
-      borderStyle="round"
+      borderStyle="single"
       borderColor={disabled ? theme.border : theme.borderFocus}
       borderDimColor={disabled}
+      borderLeft={false}
+      borderRight={false}
       paddingX={1}
       flexDirection="column"
     >

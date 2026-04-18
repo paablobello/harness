@@ -78,7 +78,6 @@ function renderBody(
             value={state.session.withTools ? `${state.session.toolCount} on` : "off"}
           />
           <Kv label="details" value={state.details ? "on" : "off"} />
-          <Kv label="theme" value={state.themeName} />
           <Kv label="config" value={state.session.configPath ?? "none"} />
           <Kv
             label="log"
@@ -136,28 +135,6 @@ function renderBody(
               ? "Tool blocks show input JSON and expanded output."
               : "Tool blocks are back to compact summaries."}
           </Text>
-        </Box>
-      );
-    case "themes":
-      return (
-        <Box flexDirection="column">
-          <Text bold color={theme.primary}>
-            Themes
-          </Text>
-          <Text color={theme.textMuted}>
-            Current: {state.themeName}. Usage:{" "}
-            <Text color={theme.primary}>/theme &lt;name&gt;</Text>
-          </Text>
-          {overlay.available.map((name) => (
-            <Text key={name}>
-              · {name}
-              {name === state.themeName ? (
-                <Text color={theme.primary} bold>
-                  {" (active)"}
-                </Text>
-              ) : null}
-            </Text>
-          ))}
         </Box>
       );
     case "log":

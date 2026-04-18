@@ -8,6 +8,7 @@ import pc from "picocolors";
 import { FileEventSink } from "../runtime/events.js";
 import { runSession } from "../runtime/session.js";
 import type { ModelAdapter } from "../types.js";
+import { buildChatSystemPrompt } from "./prompts.js";
 import {
   buildAdapter,
   buildPolicy,
@@ -48,7 +49,6 @@ type ChatOptions = {
   tui?: boolean;
 };
 
-const DEFAULT_SYSTEM = "You are a helpful coding assistant.";
 
 export function chatCommand(): Command {
   return new Command("chat")
@@ -69,8 +69,9 @@ export function chatCommand(): Command {
       const cwd = process.cwd();
       const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
+      const defaultSystem = await buildChatSystemPrompt(cwd);
       const system = await composeSystemPrompt(
-        rawOpts.system ?? config.system ?? DEFAULT_SYSTEM,
+        rawOpts.system ?? config.system ?? defaultSystem,
         cwd,
       );
       const runId = randomUUID();

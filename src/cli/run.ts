@@ -7,6 +7,7 @@ import pc from "picocolors";
 
 import { FileEventSink } from "../runtime/events.js";
 import { runSession } from "../runtime/session.js";
+import { buildTaskSystemPrompt } from "./prompts.js";
 import {
   buildAdapter,
   buildPolicy,
@@ -37,10 +38,6 @@ type RunOptions = {
   sensors?: boolean;
 };
 
-const DEFAULT_SYSTEM = `You are an autonomous coding assistant running inside a sandboxed workspace.
-You have tools to read, search, and edit files, and to run shell commands.
-Complete the user's task in as few steps as possible. After each tool result, reason briefly
-about the next step. When the task is done, write a short final message summarizing what you did.`;
 
 export function runCommand(): Command {
   return new Command("run")
@@ -61,8 +58,9 @@ export function runCommand(): Command {
       const adapter = await buildAdapter(providerOpts);
       const loaded = await loadCliConfig(cwd, rawOpts.config !== false);
       const config = loaded.config;
+      const defaultSystem = await buildTaskSystemPrompt(cwd);
       const system = await composeSystemPrompt(
-        rawOpts.system ?? config.system ?? DEFAULT_SYSTEM,
+        rawOpts.system ?? config.system ?? defaultSystem,
         cwd,
       );
       const runId = randomUUID();

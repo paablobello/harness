@@ -19,7 +19,7 @@ import { StatusBar } from "./components/StatusBar.js";
 import type { Action, SessionMeta, UiState } from "./state.js";
 import { initialState, reducer } from "./state.js";
 import { ThemeProvider } from "./theme.js";
-import { resolveTheme } from "./themes/index.js";
+import { darkTheme } from "./themes/index.js";
 
 export type AppCallbacks = {
   /** Called with the next user input; resolves the pending `input.next()` Promise. */
@@ -32,7 +32,6 @@ export type AppCallbacks = {
 
 export type AppProps = {
   readonly session: SessionMeta;
-  readonly initialTheme: string;
   readonly history: readonly string[];
   readonly tools?: readonly { name: string; risk: string; source: string; description: string }[];
   readonly callbacks: AppCallbacks;
@@ -40,7 +39,7 @@ export type AppProps = {
 };
 
 export function App(props: AppProps): ReactNode {
-  const [state, dispatch] = useReducer(reducer, initialState(props.session, props.initialTheme));
+  const [state, dispatch] = useReducer(reducer, initialState(props.session));
   const quitRef = useRef<number>(0);
   const exitSentRef = useRef(false);
   const [quitHint, setQuitHint] = useState(false);
@@ -57,16 +56,15 @@ export function App(props: AppProps): ReactNode {
     }
   }, [state.shouldExit, props.callbacks]);
 
-  const theme = useMemo(() => resolveTheme(state.themeName), [state.themeName]);
+  const theme = darkTheme;
 
   const slashCtx = useMemo<SlashCommandContext>(
     () => ({
       dispatch,
       exit: () => dispatch({ type: "EXIT" }),
-      currentTheme: state.themeName,
       details: state.details,
     }),
-    [state.details, state.themeName],
+    [state.details],
   );
 
   const requestExit = useCallback((): void => {

@@ -1,11 +1,8 @@
 import type { Action } from "./state.js";
-import { THEMES } from "./themes/index.js";
-import { savePreferences } from "./preferences.js";
 
 export type SlashCommandContext = {
   dispatch(action: Action): void;
   exit(): void;
-  currentTheme: string;
   details: boolean;
 };
 
@@ -57,33 +54,6 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     run(ctx) {
       ctx.dispatch({ type: "SET_DETAILS", value: !ctx.details });
       ctx.dispatch({ type: "OPEN_OVERLAY", overlay: { type: "details" } });
-    },
-  },
-  {
-    id: "theme",
-    title: "/theme",
-    description: "Switch theme (dark, light, high-contrast)",
-    acceptsArgs: true,
-    run(ctx, args) {
-      const name = args.trim();
-      if (!name) {
-        ctx.dispatch({
-          type: "OPEN_OVERLAY",
-          overlay: { type: "themes", available: Object.keys(THEMES) },
-        });
-        return;
-      }
-      if (!(name in THEMES)) {
-        ctx.dispatch({
-          type: "INFO",
-          level: "warn",
-          text: `Unknown theme: ${name}. Try: ${Object.keys(THEMES).join(", ")}`,
-        });
-        return;
-      }
-      ctx.dispatch({ type: "SET_THEME", name });
-      ctx.dispatch({ type: "INFO", level: "info", text: `Theme changed to ${name}.` });
-      void savePreferences({ theme: name });
     },
   },
   {

@@ -66,7 +66,6 @@ export type SessionMeta = {
 
 export type UiState = {
   readonly session: SessionMeta;
-  readonly themeName: string;
   readonly details: boolean;
   readonly messages: readonly Message[];
   readonly focusedToolId: string | null;
@@ -93,7 +92,6 @@ export type Overlay =
   | { readonly type: "model" }
   | { readonly type: "log" }
   | { readonly type: "details" }
-  | { readonly type: "themes"; readonly available: readonly string[] }
   | { readonly type: "message"; readonly level: "info" | "warn" | "error"; readonly text: string };
 
 export type Action =
@@ -114,17 +112,15 @@ export type Action =
   | { type: "TOGGLE_EXPAND"; id: string }
   | { type: "FOCUS_TOOL"; direction: "next" | "prev" }
   | { type: "SET_DETAILS"; value: boolean }
-  | { type: "SET_THEME"; name: string }
   | { type: "OPEN_OVERLAY"; overlay: Overlay }
   | { type: "CLOSE_OVERLAY" }
   | { type: "CLEAR" }
   | { type: "EXIT" }
   | { type: "INFO"; level: "info" | "warn" | "error"; text: string };
 
-export function initialState(session: SessionMeta, themeName: string): UiState {
+export function initialState(session: SessionMeta): UiState {
   return {
     session,
-    themeName,
     details: false,
     messages: [],
     focusedToolId: null,
@@ -307,8 +303,6 @@ export function reducer(state: UiState, action: Action): UiState {
     }
     case "SET_DETAILS":
       return { ...state, details: action.value };
-    case "SET_THEME":
-      return { ...state, themeName: action.name };
     case "OPEN_OVERLAY":
       return { ...state, overlay: action.overlay };
     case "CLOSE_OVERLAY":

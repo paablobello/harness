@@ -44,8 +44,16 @@ describe("read_file", () => {
     expect(r.meta?.["truncated"]).toBe(true);
   });
 
-  it("fails on missing file", async () => {
-    await expect(readFileTool.run({ path: "missing.ts" }, ctx())).rejects.toThrow();
+  it("returns a friendly error on missing file", async () => {
+    const r = await readFileTool.run({ path: "missing.ts" }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.output).toBe("File not found: missing.ts");
+  });
+
+  it("returns a friendly error when path is a directory", async () => {
+    const r = await readFileTool.run({ path: "src" }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.output).toMatch(/is a directory/);
   });
 });
 
@@ -61,6 +69,12 @@ describe("list_files", () => {
     const r = await listFilesTool.run({ glob: "src/*.ts" }, ctx());
     expect(r.output.split("\n").sort()).toEqual(["src/a.ts", "src/b.ts"]);
   });
+
+  it("returns a friendly error on missing path", async () => {
+    const r = await listFilesTool.run({ path: "no/such/dir" }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.output).toBe("Path not found: no/such/dir");
+  });
 });
 
 describe("grep_files", () => {
@@ -73,5 +87,11 @@ describe("grep_files", () => {
   it("returns no matches message when nothing hits", async () => {
     const r = await grepFilesTool.run({ pattern: "zzznomatch" }, ctx());
     expect(r.output).toBe("(no matches)");
+  });
+
+  it("returns a friendly error on missing path", async () => {
+    const r = await grepFilesTool.run({ pattern: "foo", path: "no/such/dir" }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.output).toBe("Path not found: no/such/dir");
   });
 });

@@ -50,7 +50,19 @@ export const listFilesTool: ToolDefinition<z.infer<typeof input>> = {
       }
     }
 
-    const st = await stat(base);
+    let st;
+    try {
+      st = await stat(base);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        return { ok: false, output: `Path not found: ${args.path ?? "."}` };
+      }
+      if (code === "EACCES" || code === "EPERM") {
+        return { ok: false, output: `Permission denied: ${args.path ?? "."}` };
+      }
+      throw err;
+    }
     if (st.isFile()) return { ok: true, output: relative(realRoot, base) || base };
     await walk(base);
     const truncated = results.length >= MAX_ENTRIES;

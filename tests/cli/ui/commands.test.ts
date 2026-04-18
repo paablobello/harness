@@ -9,12 +9,6 @@ describe("slash command catalog", () => {
     expect(out.map((c) => c.title)).toEqual(["/help"]);
   });
 
-  it("returns an exact match once the user types a space + args", () => {
-    const out = filterCommands("/theme light");
-    expect(out).toHaveLength(1);
-    expect(out[0]?.title).toBe("/theme");
-  });
-
   it("exposes the full catalog for bare /", () => {
     expect(filterCommands("/").length).toBe(SLASH_COMMANDS.length);
   });
@@ -26,7 +20,7 @@ describe("slash command catalog", () => {
 
 describe("dispatchSlash", () => {
   function ctx(dispatch: (a: Action) => void) {
-    return { dispatch, exit: vi.fn(), currentTheme: "dark", details: false };
+    return { dispatch, exit: vi.fn(), details: false };
   }
 
   it("dispatches the handler for a known command and returns true", () => {
@@ -39,7 +33,7 @@ describe("dispatchSlash", () => {
   it("maps aliases (/q, /?) to their canonical handler", () => {
     const dispatch = vi.fn();
     const exit = vi.fn();
-    const res = dispatchSlash("/q", { dispatch, exit, currentTheme: "dark", details: false });
+    const res = dispatchSlash("/q", { dispatch, exit, details: false });
     expect(res).toBe(true);
     expect(exit).toHaveBeenCalled();
   });
@@ -51,18 +45,6 @@ describe("dispatchSlash", () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "INFO", level: "warn" }));
   });
 
-  it("/theme with a known name dispatches SET_THEME", () => {
-    const dispatch = vi.fn();
-    dispatchSlash("/theme light", ctx(dispatch));
-    expect(dispatch).toHaveBeenCalledWith({ type: "SET_THEME", name: "light" });
-  });
-
-  it("/theme with an unknown name emits a warning", () => {
-    const dispatch = vi.fn();
-    dispatchSlash("/theme nebula", ctx(dispatch));
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "INFO", level: "warn" }));
-  });
-
   it("/details toggles details based on current UI state", () => {
     const dispatch = vi.fn();
     dispatchSlash("/details", { ...ctx(dispatch), details: false });
@@ -71,5 +53,11 @@ describe("dispatchSlash", () => {
     dispatch.mockClear();
     dispatchSlash("/details", { ...ctx(dispatch), details: true });
     expect(dispatch).toHaveBeenCalledWith({ type: "SET_DETAILS", value: false });
+  });
+
+  it("bare / opens the help overlay", () => {
+    const dispatch = vi.fn();
+    dispatchSlash("/", ctx(dispatch));
+    expect(dispatch).toHaveBeenCalledWith({ type: "OPEN_OVERLAY", overlay: { type: "help" } });
   });
 });

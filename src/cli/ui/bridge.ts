@@ -13,7 +13,6 @@ import type { ModelAdapter, PermissionMode } from "../../types.js";
 
 import { App, type AppCallbacks } from "./App.js";
 import { loadHistory } from "./history.js";
-import { detectTerminalTheme, loadPreferences } from "./preferences.js";
 import type { Action, SessionMeta } from "./state.js";
 
 const EXIT_SIGNAL = "\x00__HARNESS_EXIT__\x00";
@@ -54,7 +53,6 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
     toolCount: toolList?.length ?? 0,
   };
 
-  const prefs = await loadPreferences();
   const history = await loadHistory();
 
   // A queue of user inputs the runtime will pull from.
@@ -127,7 +125,6 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
 
   const appElement = createElement(App, {
     session,
-    initialTheme: prefs.theme ?? detectTerminalTheme(),
     history,
     tools: toolList,
     callbacks,

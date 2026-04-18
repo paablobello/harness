@@ -14,7 +14,7 @@ const SESSION: SessionMeta = {
 };
 
 function base() {
-  return initialState(SESSION, "dark");
+  return initialState(SESSION);
 }
 
 describe("UI state reducer", () => {
@@ -92,13 +92,6 @@ describe("UI state reducer", () => {
   it("does not count an idle TURN_END as a completed turn", () => {
     const s = reducer(base(), { type: "TURN_END" });
     expect(s.stats.turns).toBe(0);
-  });
-
-  it("switches themes without mutating other state", () => {
-    let s = reducer(base(), { type: "USER_SENT", text: "hi" });
-    s = reducer(s, { type: "SET_THEME", name: "light" });
-    expect(s.themeName).toBe("light");
-    expect(s.messages).toHaveLength(1);
   });
 
   it("CLEAR resets messages but keeps session meta", () => {

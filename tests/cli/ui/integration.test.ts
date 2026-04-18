@@ -38,7 +38,7 @@ describe("UI state integration with runSession", () => {
       ],
     ]);
 
-    let state = initialState(SESSION, "dark");
+    let state = initialState(SESSION);
     const dispatch = (action: Action): void => {
       state = reducer(state, action);
     };
@@ -94,7 +94,7 @@ describe("UI state integration with runSession", () => {
   });
 
   it("tracks tool calls as they run and resolve", () => {
-    let state = initialState(SESSION, "dark");
+    let state = initialState(SESSION);
     const dispatch = (action: Action): void => {
       state = reducer(state, action);
     };

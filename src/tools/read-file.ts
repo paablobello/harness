@@ -26,9 +26,27 @@ export const readFileTool: ToolDefinition<z.infer<typeof input>> = {
   source: "builtin",
   async run(args, ctx) {
     const abs = await resolveWithinWorkspace(ctx.workspaceRoot, args.path);
-    const st = await stat(abs);
+    let st;
+    try {
+      st = await stat(abs);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        return { ok: false, output: `File not found: ${args.path}` };
+      }
+      if (code === "EACCES" || code === "EPERM") {
+        return { ok: false, output: `Permission denied: ${args.path}` };
+      }
+      throw err;
+    }
+    if (st.isDirectory()) {
+      return {
+        ok: false,
+        output: `${args.path} is a directory. Use list_files to list its contents.`,
+      };
+    }
     if (!st.isFile()) {
-      return { ok: false, output: `Not a file: ${args.path}` };
+      return { ok: false, output: `Not a regular file: ${args.path}` };
     }
     const limit = args.max_bytes ?? MAX_BYTES;
     const raw = await readFile(abs);
