@@ -47,7 +47,7 @@ describe("apply_patch", () => {
 `;
     const r = await applyPatchTool.run({ path: "a.txt", unified_diff: diff }, ctx());
     expect(r.ok).toBe(false);
-    expect(r.output).toMatch(/context mismatch/);
+    expect(r.output).toMatch(/context matches until line \d+ but diverges/);
     expect(await readFile(join(root, "a.txt"), "utf8")).toBe("one\ntwo\n");
   });
 
@@ -66,5 +66,67 @@ describe("apply_patch", () => {
     const r = await applyPatchTool.run({ path: "a.txt", unified_diff: diff }, ctx());
     expect(r.ok).toBe(true);
     expect(await readFile(p, "utf8")).toBe("one\n2\n3\nfour\n5\n");
+  });
+
+  it("accepts numberless '@@' hunk headers (Codex/OpenAI style)", async () => {
+    const p = join(root, "a.txt");
+    await writeFile(p, "import os\nimport random\nfrom datetime import datetime\nrest\n");
+    const diff = `@@
+-import os
+-import random
+-from datetime import datetime
++import os
++import random
++from datetime import datetime, timedelta, timezone
+`;
+    const r = await applyPatchTool.run({ path: "a.txt", unified_diff: diff }, ctx());
+    expect(r.ok).toBe(true);
+    expect(await readFile(p, "utf8")).toBe(
+      "import os\nimport random\nfrom datetime import datetime, timedelta, timezone\nrest\n",
+    );
+  });
+
+  it("accepts '@@ context hint @@' numberless headers", async () => {
+    const p = join(root, "a.txt");
+    await writeFile(p, "a\nfoo\nbar\nb\n");
+    const diff = `@@ around foo @@
+ foo
+-bar
++baz
+ b
+`;
+    const r = await applyPatchTool.run({ path: "a.txt", unified_diff: diff }, ctx());
+    expect(r.ok).toBe(true);
+    expect(await readFile(p, "utf8")).toBe("a\nfoo\nbaz\nb\n");
+  });
+
+  it("applies multiple numberless hunks in order without overlap", async () => {
+    const p = join(root, "a.txt");
+    await writeFile(p, "alpha\nfoo\nbeta\nfoo\ngamma\n");
+    const diff = `@@
+ alpha
+-foo
++FOO1
+ beta
+@@
+ beta
+-foo
++FOO2
+ gamma
+`;
+    const r = await applyPatchTool.run({ path: "a.txt", unified_diff: diff }, ctx());
+    expect(r.ok).toBe(true);
+    expect(await readFile(p, "utf8")).toBe("alpha\nFOO1\nbeta\nFOO2\ngamma\n");
+  });
+
+  it("fails with a helpful message when numberless context is not found", async () => {
+    await writeFile(join(root, "a.txt"), "one\ntwo\nthree\n");
+    const diff = `@@
+-zzz
++yyy
+`;
+    const r = await applyPatchTool.run({ path: "a.txt", unified_diff: diff }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.output).toMatch(/could not locate hunk context/);
   });
 });

@@ -19,7 +19,10 @@ export class PolicyEngine {
   private readonly stickyAllow = new Set<string>();
 
   constructor(opts: PolicyEngineOptions) {
-    this.rules = opts.rules;
+    // Copy so runtime mutations (addRule from "always allow") don't leak into
+    // the caller's array — defaultPolicy is a module-level const shared across
+    // engine instances.
+    this.rules = [...opts.rules];
     this.mode = opts.mode ?? "default";
     this.ask = opts.ask ?? (async () => false);
   }
@@ -30,6 +33,17 @@ export class PolicyEngine {
 
   getMode(): PermissionMode {
     return this.mode;
+  }
+
+  /**
+   * Add a rule at runtime, ahead of the existing rules so it takes precedence.
+   * Used by the TUI's "always allow for session" affordance: when the user
+   * approves a tool with `a`, the dialog calls this to register a session-wide
+   * allow rule for that tool name.
+   */
+  addRule(rule: PolicyRule, position: "first" | "last" = "first"): void {
+    if (position === "first") this.rules.unshift(rule);
+    else this.rules.push(rule);
   }
 
   /**

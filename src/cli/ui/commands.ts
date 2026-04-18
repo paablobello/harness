@@ -4,6 +4,10 @@ export type SlashCommandContext = {
   dispatch(action: Action): void;
   exit(): void;
   details: boolean;
+  /** Optional hook the UI wires up to the runtime ControlChannel. */
+  onCompact?: (instructions?: string) => void;
+  /** Optional hook the UI wires up to the runtime ControlChannel. */
+  onClear?: () => void;
 };
 
 export type SlashCommand = {
@@ -65,11 +69,46 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     },
   },
   {
+    id: "usage",
+    title: "/usage",
+    description: "Show tokens, cost, context window, and per-tool stats for this session",
+    run(ctx) {
+      ctx.dispatch({ type: "OPEN_OVERLAY", overlay: { type: "usage" } });
+    },
+  },
+  {
+    id: "context",
+    title: "/context",
+    description: "Show a breakdown of the current context window fill",
+    run(ctx) {
+      ctx.dispatch({ type: "OPEN_OVERLAY", overlay: { type: "context" } });
+    },
+  },
+  {
+    id: "compact",
+    title: "/compact",
+    description: "Summarise older messages to free context. Optional focus: /compact focus on X",
+    acceptsArgs: true,
+    run(ctx, args) {
+      const instructions = args.trim();
+      if (ctx.onCompact) {
+        ctx.onCompact(instructions.length > 0 ? instructions : undefined);
+      } else {
+        ctx.dispatch({
+          type: "INFO",
+          level: "warn",
+          text: "Compaction is not available in this session.",
+        });
+      }
+    },
+  },
+  {
     id: "clear",
     title: "/clear",
-    description: "Clear the chat history from the screen",
+    description: "Drop the runtime conversation history and clear the transcript",
     run(ctx) {
       ctx.dispatch({ type: "CLEAR" });
+      ctx.onClear?.();
     },
   },
   {

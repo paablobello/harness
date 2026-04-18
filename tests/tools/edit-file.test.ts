@@ -32,6 +32,17 @@ describe("edit_file", () => {
     expect(await readFile(p, "utf8")).toBe("hola world\ngoodbye world");
   });
 
+  it("includes a unified diff in the output", async () => {
+    const p = join(root, "a.txt");
+    await writeFile(p, "foo\nbar\n");
+    const r = await editFileTool.run({ path: "a.txt", old_str: "foo", new_str: "baz" }, ctx());
+    expect(r.ok).toBe(true);
+    expect(r.output).toMatch(/^Edited a\.txt/);
+    expect(r.output).toMatch(/@@/);
+    expect(r.output).toMatch(/^-foo$/m);
+    expect(r.output).toMatch(/^\+baz$/m);
+  });
+
   it("fails when old_str is missing", async () => {
     await writeFile(join(root, "a.txt"), "hi");
     const r = await editFileTool.run({ path: "a.txt", old_str: "nope", new_str: "x" }, ctx());

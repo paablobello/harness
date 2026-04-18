@@ -198,6 +198,7 @@ async function runPlainChat(args: PlainChatArgs): ReturnType<typeof runSession> 
       ...(config.maxSubagentDepth !== undefined
         ? { maxSubagentDepth: config.maxSubagentDepth }
         : {}),
+      ...(config.contextManagement ? { contextManagement: config.contextManagement } : {}),
       input: {
         async next() {
           return readUserInput(rl, {

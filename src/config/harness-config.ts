@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import type { HookDispatcher } from "../hooks/dispatcher.js";
 import type { McpServerSpec } from "../mcp/client.js";
 import type { PolicyEngine } from "../policy/engine.js";
+import type { ContextManagementConfig } from "../runtime/session.js";
 import type { Sensor } from "../sensors/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { PolicyRule } from "../types.js";
@@ -30,6 +31,8 @@ export type HarnessConfig = {
   system?: string;
   maxToolsPerUserTurn?: number;
   maxSubagentDepth?: number;
+  /** Context-window compaction settings. Falls through to `runSession`. */
+  contextManagement?: ContextManagementConfig;
 };
 
 export type LoadedHarnessConfig = {
@@ -99,6 +102,44 @@ export function validateHarnessConfig(config: HarnessConfig): string[] {
   if (raw["policyRules"] !== undefined && !Array.isArray(raw["policyRules"])) {
     errors.push("policyRules must be an array");
   }
+  if (raw["contextManagement"] !== undefined) {
+    if (!isRecord(raw["contextManagement"])) {
+      errors.push("contextManagement must be an object");
+    } else {
+      const cm = raw["contextManagement"];
+      if (cm["autoCompact"] !== undefined && typeof cm["autoCompact"] !== "boolean") {
+        errors.push("contextManagement.autoCompact must be boolean");
+      }
+      for (const key of ["warnThreshold", "compactThreshold"] as const) {
+        if (cm[key] !== undefined && !isRatio(cm[key])) {
+          errors.push(`contextManagement.${key} must be a number in (0, 1]`);
+        }
+      }
+      for (const key of ["keepLastNTurns", "keepLastNToolOutputs"] as const) {
+        if (cm[key] !== undefined && !isNonNegativeInteger(cm[key])) {
+          errors.push(`contextManagement.${key} must be a non-negative integer`);
+        }
+      }
+      if (cm["summarizerSystem"] !== undefined && typeof cm["summarizerSystem"] !== "string") {
+        errors.push("contextManagement.summarizerSystem must be a string");
+      }
+      if (cm["snapshotDir"] !== undefined && typeof cm["snapshotDir"] !== "string") {
+        errors.push("contextManagement.snapshotDir must be a string");
+      }
+      if (cm["summarizerAdapter"] !== undefined && !hasMethods(cm["summarizerAdapter"], ["runTurn"])) {
+        errors.push("contextManagement.summarizerAdapter must expose runTurn()");
+      }
+      if (
+        cm["warnThreshold"] !== undefined &&
+        cm["compactThreshold"] !== undefined &&
+        typeof cm["warnThreshold"] === "number" &&
+        typeof cm["compactThreshold"] === "number" &&
+        cm["warnThreshold"] >= cm["compactThreshold"]
+      ) {
+        errors.push("contextManagement.warnThreshold must be strictly less than compactThreshold");
+      }
+    }
+  }
   if (raw["sensors"] !== undefined) {
     if (!Array.isArray(raw["sensors"])) {
       errors.push("sensors must be an array");
@@ -160,7 +201,12 @@ export function summarizeHarnessConfig(config: HarnessConfig): string {
   if (config.maxToolsPerUserTurn !== undefined)
     parts.push(`maxTools=${config.maxToolsPerUserTurn}`);
   if (config.maxSubagentDepth !== undefined) parts.push(`maxSubagents=${config.maxSubagentDepth}`);
+  if (config.contextManagement) parts.push("contextManagement");
   return parts.length > 0 ? parts.join(", ") : "no overrides";
+}
+
+function isRatio(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 1;
 }
 
 function hasMethods(value: unknown, methods: string[]): boolean {

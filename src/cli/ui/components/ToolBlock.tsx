@@ -13,15 +13,18 @@ type Props = {
   readonly msg: ToolMsg;
   readonly focused: boolean;
   readonly details: boolean;
+  readonly connector?: boolean;
 };
 
-export function ToolBlock({ msg, focused, details }: Props): ReactNode {
+export function ToolBlock({ msg, focused, details, connector = false }: Props): ReactNode {
   const theme = useTheme();
   const expanded = msg.expanded || details;
   const summary = formatInputSummary(msg.name, msg.input);
+  const hasOutput = (msg.status === "ok" || msg.status === "fail") && msg.output.length > 0;
+  const showJson = details;
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginBottom={connector ? 0 : 1}>
       <Box>
         <StatusBadge status={msg.status} />
         <Text> </Text>
@@ -36,17 +39,30 @@ export function ToolBlock({ msg, focused, details }: Props): ReactNode {
         )}
         {msg.status === "ok" || msg.status === "fail"
           ? msg.durationMs !== undefined && (
-              <Text color={theme.textMuted}>{"  "}({formatDuration(msg.durationMs)})</Text>
+              <Text color={theme.textDim}>{"  "}({formatDuration(msg.durationMs)})</Text>
             )
           : null}
       </Box>
-      {details && (
-        <Box marginLeft={2} flexDirection="column">
-          <Text color={theme.textMuted}>{safeJson(msg.input)}</Text>
-        </Box>
+      {showJson &&
+        safeJson(msg.input)
+          .split("\n")
+          .map((line, i) => (
+            <Box key={`j${i}`}>
+              <Text color={theme.accentDim}>{"│ "}</Text>
+              <Text color={theme.textMuted}>{line || " "}</Text>
+            </Box>
+          ))}
+      {hasOutput && (
+        <ToolOutput
+          msg={msg}
+          expanded={expanded}
+          statusColor={colorForStatus(msg.status, theme)}
+        />
       )}
-      {(msg.status === "ok" || msg.status === "fail") && (
-        <ToolOutput msg={msg} expanded={expanded} statusColor={colorForStatus(msg.status, theme)} />
+      {connector && (
+        <Box>
+          <Text color={theme.accentDim}>{"│"}</Text>
+        </Box>
       )}
     </Box>
   );
@@ -70,26 +86,35 @@ function ToolOutput({
     const visible = expanded ? allLines : allLines.slice(0, 2);
     const rest = allLines.length - visible.length;
     return (
-      <Box flexDirection="column" marginLeft={2}>
+      <>
         {visible.map((line, i) => (
-          <Text key={i} color={statusColor}>
-            {line || " "}
-          </Text>
+          <Box key={i}>
+            <Text color={theme.accentDim}>{"│ "}</Text>
+            <Text color={statusColor}>{line || " "}</Text>
+          </Box>
         ))}
         {rest > 0 && (
-          <Text color={theme.textMuted}>
-            … +{rest} more lines (Ctrl+O to expand)
-          </Text>
+          <Box>
+            <Text color={theme.accentDim}>{"│ "}</Text>
+            <Text color={theme.textDim}>… +{rest} more lines (Ctrl+O to expand)</Text>
+          </Box>
         )}
-      </Box>
+      </>
     );
   }
 
   if (isDiffOutput(msg)) {
+    const { header, body } = splitDiff(output);
     return (
-      <Box marginLeft={2}>
-        <DiffView diff={output} expanded={expanded} />
-      </Box>
+      <>
+        {header && (
+          <Box>
+            <Text color={theme.accentDim}>{"│ "}</Text>
+            <Text color={theme.textMuted}>{header}</Text>
+          </Box>
+        )}
+        {body && <DiffView diff={body} expanded={expanded} />}
+      </>
     );
   }
 
@@ -102,18 +127,22 @@ function ToolOutput({
   const renderedLines = highlighted.split("\n");
 
   return (
-    <Box flexDirection="column" marginLeft={2}>
+    <>
       {renderedLines.map((line, i) => (
-        <Text key={i} color={theme.textMuted}>
-          {line || " "}
-        </Text>
+        <Box key={i}>
+          <Text color={theme.accentDim}>{"│ "}</Text>
+          <Text color={theme.textMuted}>{line || " "}</Text>
+        </Box>
       ))}
       {rest > 0 && (
-        <Text color={theme.textMuted}>
-          … +{rest} more line{rest === 1 ? "" : "s"} (Ctrl+O to expand)
-        </Text>
+        <Box>
+          <Text color={theme.accentDim}>{"│ "}</Text>
+          <Text color={theme.textDim}>
+            … +{rest} more line{rest === 1 ? "" : "s"} (Ctrl+O to expand)
+          </Text>
+        </Box>
       )}
-    </Box>
+    </>
   );
 }
 
@@ -171,9 +200,22 @@ function countPatchFiles(patch: string): number {
 }
 
 function isDiffOutput(msg: ToolMsg): boolean {
-  if (msg.name === "apply_patch" || msg.name === "edit") return true;
+  if (msg.name === "apply_patch" || msg.name === "edit" || msg.name === "edit_file") {
+    return /@@.*@@/.test(msg.output) || /^[+-]/m.test(msg.output);
+  }
+  if (/^@@.*@@/m.test(msg.output)) return true;
   if (/^---\s.*\n\+\+\+\s/m.test(msg.output)) return true;
   return false;
+}
+
+function splitDiff(output: string): { header: string; body: string } {
+  const lines = output.split("\n");
+  const hunkIdx = lines.findIndex((l) => l.startsWith("@@"));
+  if (hunkIdx <= 0) return { header: "", body: output };
+  return {
+    header: lines.slice(0, hunkIdx).join("\n").trim(),
+    body: lines.slice(hunkIdx).join("\n"),
+  };
 }
 
 function languageForTool(msg: ToolMsg): string | undefined {

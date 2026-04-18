@@ -12,7 +12,10 @@ export type Theme = {
   readonly background?: string;
   readonly text: string;
   readonly textMuted: string;
+  readonly textDim: string;
   readonly primary: string;
+  readonly accentDim: string;
+  readonly accentSoft: string;
   readonly secondary: string;
   readonly border: string;
   readonly borderFocus: string;
@@ -20,12 +23,15 @@ export type Theme = {
   readonly success: string;
   readonly warning: string;
   readonly user: string;
+  readonly userBg?: string;
   readonly assistant: string;
   readonly tool: string;
   readonly toolRunning: string;
   readonly diff: {
     readonly add: string;
+    readonly addBg: string;
     readonly del: string;
+    readonly delBg: string;
     readonly hunk: string;
   };
   readonly status: {

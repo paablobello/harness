@@ -19,6 +19,8 @@ export type HookEvent =
   | "SubagentStart"
   | "SubagentStop"
   | "Stop"
+  | "PreCompact"
+  | "PostCompact"
   | "SessionEnd";
 
 export type HookPayloadBase = {
@@ -68,12 +70,27 @@ export type HookPayload =
       reason: "end_turn" | "max_tokens" | "tool_use" | "error";
     })
   | (HookPayloadBase & {
+      hook_event_name: "PreCompact";
+      reason: "auto" | "manual";
+      input_tokens: number;
+      context_window: number | undefined;
+      threshold: number;
+      instructions?: string;
+    })
+  | (HookPayloadBase & {
+      hook_event_name: "PostCompact";
+      reason: "auto" | "manual";
+      summary_tokens: number;
+      freed_messages: number;
+      snapshot_path: string;
+    })
+  | (HookPayloadBase & {
       hook_event_name: "SessionEnd";
       end_reason: "user_exit" | "eof" | "error";
     });
 
 export type HookResult = {
-  /** Cancel the downstream action (only honored for UserPromptSubmit and PreToolUse). */
+  /** Cancel the downstream action (honored for UserPromptSubmit, PreToolUse and PreCompact). */
   block?: boolean;
   /** Human-readable reason; for PreToolUse, this becomes the tool error passed back to the model. */
   reason?: string;

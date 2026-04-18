@@ -36,3 +36,13 @@ export function computeCost(
   if (!p) return undefined;
   return (inputTokens / 1_000_000) * p.inputPer1M + (outputTokens / 1_000_000) * p.outputPer1M;
 }
+
+/**
+ * True when the given model has an entry in the pricing table. Use this to
+ * distinguish "cost is genuinely zero" from "we don't know how to price this
+ * model" in the UI — showing a fake `$0` for an untabulated model hides
+ * real spend from the user.
+ */
+export function hasPricing(model: string): boolean {
+  return model in PRICING;
+}

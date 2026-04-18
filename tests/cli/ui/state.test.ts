@@ -87,6 +87,40 @@ describe("UI state reducer", () => {
     expect(s.stats.tokensIn).toBe(100);
     expect(s.stats.tokensOut).toBe(50);
     expect(s.stats.costUsd).toBeCloseTo(0.001);
+    expect(s.usage.lastInputTokens).toBe(100);
+  });
+
+  it("aggregates per-tool usage (count, total duration, failures)", () => {
+    let s = reducer(base(), { type: "USER_SENT", text: "go" });
+    s = reducer(s, { type: "TOOL_CALL", call: { id: "t1", name: "read", input: {} } });
+    s = reducer(s, { type: "TOOL_RESULT", id: "t1", ok: true, output: "ok", durationMs: 20 });
+    s = reducer(s, { type: "TOOL_CALL", call: { id: "t2", name: "read", input: {} } });
+    s = reducer(s, { type: "TOOL_RESULT", id: "t2", ok: false, output: "err", durationMs: 30 });
+    s = reducer(s, { type: "TOOL_CALL", call: { id: "t3", name: "grep", input: {} } });
+    s = reducer(s, { type: "TOOL_RESULT", id: "t3", ok: true, output: "ok", durationMs: 10 });
+    expect(s.usage.toolUsage.read).toEqual({ count: 2, totalMs: 50, failures: 1 });
+    expect(s.usage.toolUsage.grep).toEqual({ count: 1, totalMs: 10, failures: 0 });
+  });
+
+  it("records a turn snapshot with token/cost/tool deltas on TURN_END", () => {
+    let s = reducer(base(), { type: "USER_SENT", text: "hi" });
+    s = reducer(s, { type: "TOOL_CALL", call: { id: "t1", name: "read", input: {} } });
+    s = reducer(s, { type: "TOOL_RESULT", id: "t1", ok: true, output: "ok", durationMs: 5 });
+    s = reducer(s, { type: "USAGE", inputTokens: 200, outputTokens: 40, costUsd: 0.002 });
+    s = reducer(s, { type: "ASSIST_END", text: "done" });
+    s = reducer(s, { type: "TURN_END" });
+    expect(s.usage.turnHistory).toHaveLength(1);
+    const [turn] = s.usage.turnHistory;
+    expect(turn).toBeDefined();
+    if (!turn) throw new Error("unreachable");
+    expect(turn.index).toBe(1);
+    expect(turn.tokensIn).toBe(200);
+    expect(turn.tokensOut).toBe(40);
+    expect(turn.costUsd).toBeCloseTo(0.002);
+    expect(turn.toolCalls).toBe(1);
+    expect(turn.toolFailures).toBe(0);
+    expect(turn.durationMs).toBeGreaterThanOrEqual(0);
+    expect(s.usage.turnAnchor).toBeNull();
   });
 
   it("does not count an idle TURN_END as a completed turn", () => {
@@ -99,6 +133,57 @@ describe("UI state reducer", () => {
     s = reducer(s, { type: "CLEAR" });
     expect(s.messages).toHaveLength(0);
     expect(s.session).toEqual(SESSION);
+  });
+
+  it("COMPACT_START sets compaction state and appends info message", () => {
+    const s = reducer(base(), { type: "COMPACT_START", reason: "auto" });
+    expect(s.compaction?.reason).toBe("auto");
+    expect(s.compaction?.phase).toBe("summarizing");
+    const last = s.messages[s.messages.length - 1];
+    expect(last && last.kind === "info" && /[Aa]uto-compact/.test(last.text)).toBe(true);
+  });
+
+  it("COMPACT_END clears compaction, resets lastInputTokens, logs summary info", () => {
+    let s = reducer(base(), {
+      type: "USAGE",
+      inputTokens: 190_000,
+      outputTokens: 100,
+      costUsd: 0,
+    });
+    expect(s.usage.lastInputTokens).toBe(190_000);
+    s = reducer(s, { type: "COMPACT_START", reason: "manual" });
+    s = reducer(s, {
+      type: "COMPACT_END",
+      reason: "manual",
+      freedMessages: 10,
+      summaryTokens: 500,
+      snapshotPath: "/tmp/snap.json",
+      durationMs: 50,
+    });
+    expect(s.compaction).toBeNull();
+    expect(s.contextWarning).toBeNull();
+    expect(s.usage.lastInputTokens).toBe(0);
+    const last = s.messages[s.messages.length - 1];
+    expect(last && last.kind === "info" && /Compacted 10/.test(last.text)).toBe(true);
+  });
+
+  it("CONTEXT_WARNING records the last warning ratio", () => {
+    const s = reducer(base(), { type: "CONTEXT_WARNING", ratio: 0.82 });
+    expect(s.contextWarning?.ratio).toBeCloseTo(0.82);
+  });
+
+  it("HISTORY_CLEARED resets tokens and logs how many messages were dropped", () => {
+    let s = reducer(base(), {
+      type: "USAGE",
+      inputTokens: 100_000,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+    s = reducer(s, { type: "HISTORY_CLEARED", messagesDropped: 12 });
+    expect(s.usage.lastInputTokens).toBe(0);
+    expect(s.contextWarning).toBeNull();
+    const last = s.messages[s.messages.length - 1];
+    expect(last && last.kind === "info" && /Cleared 12/.test(last.text)).toBe(true);
   });
 
   it("POLICY_ASK / POLICY_RESOLVE toggles pendingPolicy", () => {

@@ -82,6 +82,28 @@ export type HarnessEvent = BaseFields &
         reason: "end_turn" | "max_tokens" | "tool_use" | "error";
         error?: string;
       }
+    | {
+        event: "ContextWarning";
+        input_tokens: number;
+        context_window: number;
+        ratio: number;
+      }
+    | {
+        event: "CompactStart";
+        reason: "auto" | "manual";
+        input_tokens: number;
+        threshold: number;
+        instructions?: string;
+      }
+    | {
+        event: "CompactEnd";
+        reason: "auto" | "manual";
+        summary_tokens: number;
+        freed_messages: number;
+        snapshot_path: string;
+        duration_ms: number;
+      }
+    | { event: "HistoryCleared"; messages_dropped: number }
     | { event: "SessionEnd"; end_reason: SessionEndReason }
   );
 

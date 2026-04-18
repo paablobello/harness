@@ -112,6 +112,7 @@ export function runCommand(): Command {
             ...(config.maxSubagentDepth !== undefined
               ? { maxSubagentDepth: config.maxSubagentDepth }
               : {}),
+            ...(config.contextManagement ? { contextManagement: config.contextManagement } : {}),
             input: {
               async next() {
                 if (delivered) return null;

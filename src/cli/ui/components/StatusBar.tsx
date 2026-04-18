@@ -1,15 +1,18 @@
 import { Box, Text } from "ink";
 import type { ReactNode } from "react";
 
+import { classifyContext } from "../../../runtime/context-window.js";
+import { hasPricing } from "../../../runtime/cost.js";
 import type { UiState } from "../state.js";
 import { useTheme } from "../theme.js";
-import { Spinner } from "./Spinner.js";
 
 export function StatusBar({ state }: { state: UiState }): ReactNode {
   const theme = useTheme();
-  const { session, stats, isAssistantStreaming, isTurnActive } = state;
-  const cost = stats.costUsd > 0 ? `$${stats.costUsd.toFixed(4)}` : "$0";
+  const { session, stats } = state;
+  const modelPriced = hasPricing(session.adapter.model);
+  const cost = modelPriced ? `$${stats.costUsd.toFixed(4)}` : "cost n/a";
   const tokens = formatTokens(stats.tokensIn, stats.tokensOut);
+  const ctx = classifyContext(state.usage.lastInputTokens, session.adapter.model);
   const parts: ReactNode[] = [
     <Text key="mode" color={theme.textMuted}>
       {session.permissionMode}
@@ -33,30 +36,45 @@ export function StatusBar({ state }: { state: UiState }): ReactNode {
       </Text>,
     );
   }
+  if (ctx.ratio !== undefined && ctx.zone !== "unknown") {
+    const color =
+      ctx.zone === "critical"
+        ? theme.error
+        : ctx.zone === "warn"
+          ? theme.warning
+          : theme.textMuted;
+    parts.push(sep(theme.textMuted, 5));
+    parts.push(
+      <Text key="ctx" color={color}>
+        ctx {Math.round(ctx.ratio * 100)}%
+      </Text>,
+    );
+  }
   if (stats.toolCalls > 0) {
     parts.push(sep(theme.textMuted, 3));
     parts.push(
       <Text key="tools" color={theme.textMuted}>
-        {stats.toolCalls}
-        {stats.toolFailures > 0 ? `/${stats.toolFailures} fail` : ""} tools
+        {stats.toolCalls} tools
+      </Text>,
+    );
+    if (stats.toolFailures > 0) {
+      parts.push(sep(theme.textMuted, 4));
+      parts.push(
+        <Text key="tool-failures" color={theme.error}>
+          {stats.toolFailures} failed
+        </Text>,
+      );
+    }
+  }
+  if (state.compaction) {
+    parts.push(sep(theme.textMuted, 6));
+    parts.push(
+      <Text key="compacting" color={theme.primary}>
+        compacting…
       </Text>,
     );
   }
-  return (
-    <Box paddingX={1}>
-      {parts}
-      {(isAssistantStreaming || isTurnActive) && (
-        <>
-          {sep(theme.textMuted, 99)}
-          <Spinner color={theme.toolRunning} />
-          <Text color={theme.textMuted}>
-            {" "}
-            {isAssistantStreaming ? "thinking" : "working"}
-          </Text>
-        </>
-      )}
-    </Box>
-  );
+  return <Box paddingX={1}>{parts}</Box>;
 }
 
 function sep(color: string, key: number): ReactNode {

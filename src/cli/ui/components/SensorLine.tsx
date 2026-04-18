@@ -12,10 +12,8 @@ export function SensorLine({ msg }: { msg: SensorMsg }): ReactNode {
   return (
     <Box marginBottom={1}>
       <Text color={color}>{icon} </Text>
-      <Text color={theme.textMuted}>
-        sensor {msg.name}
-        {preview ? ` · ${preview}` : ""}
-      </Text>
+      <Text color={theme.textMuted}>sensor {msg.name}</Text>
+      {preview && <Text color={theme.textDim}> · {preview}</Text>}
     </Box>
   );
 }

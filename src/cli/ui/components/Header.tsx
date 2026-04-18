@@ -18,21 +18,26 @@ export function Header({ session }: Props): ReactNode {
     <Box flexDirection="column" marginBottom={1}>
       <Box>
         <Text bold color={theme.primary}>
-          Harness
+          ▍
+        </Text>
+        <Text bold color={theme.text}>
+          {" harness"}
         </Text>
         <Text color={theme.textMuted}>
-          {"  "}
+          {"   "}
           {session.adapter.name}:{session.adapter.model} · {session.permissionMode} · {tools}
         </Text>
       </Box>
       <Box>
-        <Text color={theme.textMuted}>
-          {session.cwd}
+        <Text color={theme.textDim}>
+          {"  "}
+          {session.cwd} · {log}
         </Text>
       </Box>
       <Box>
-        <Text color={theme.textMuted}>
-          {log} · <Text color={theme.primary}>/help</Text> for commands
+        <Text color={theme.textDim}>
+          {"  "}
+          <Text color={theme.primary}>/help</Text> for commands · Esc to cancel · Ctrl+C twice to exit
         </Text>
       </Box>
     </Box>

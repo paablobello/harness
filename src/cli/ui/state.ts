@@ -64,6 +64,44 @@ export type SessionMeta = {
   readonly toolCount: number;
 };
 
+export type TurnStat = {
+  readonly index: number;
+  readonly durationMs: number;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly costUsd: number;
+  readonly toolCalls: number;
+  readonly toolFailures: number;
+};
+
+export type ToolStat = {
+  readonly count: number;
+  readonly totalMs: number;
+  readonly failures: number;
+};
+
+export type UsageSnapshot = {
+  readonly sessionStartedAt: number;
+  /** Tokens sent as input on the most recent model turn (≈ current context window fill). */
+  readonly lastInputTokens: number;
+  readonly turnHistory: readonly TurnStat[];
+  readonly toolUsage: Readonly<Record<string, ToolStat>>;
+  /** Totals at the start of the current turn, used to compute a per-turn delta on TURN_END. */
+  readonly turnAnchor: {
+    readonly tokensIn: number;
+    readonly tokensOut: number;
+    readonly costUsd: number;
+    readonly toolCalls: number;
+    readonly toolFailures: number;
+  } | null;
+};
+
+export type CompactionState = {
+  readonly phase: "summarizing" | "saving";
+  readonly reason: "auto" | "manual";
+  readonly startedAt: number;
+};
+
 export type UiState = {
   readonly session: SessionMeta;
   readonly details: boolean;
@@ -72,6 +110,7 @@ export type UiState = {
   readonly turn: number;
   readonly isAssistantStreaming: boolean;
   readonly isTurnActive: boolean;
+  readonly turnStartedAt: number | null;
   readonly pendingPolicy: PolicyRequest | null;
   readonly stats: {
     readonly turns: number;
@@ -81,6 +120,13 @@ export type UiState = {
     readonly toolCalls: number;
     readonly toolFailures: number;
   };
+  readonly usage: UsageSnapshot;
+  readonly compaction: CompactionState | null;
+  /**
+   * Latest context-window warning (ratio >= warnThreshold). Cleared when a
+   * compaction finishes. Used by the status bar to paint `ctx %` amber.
+   */
+  readonly contextWarning: { readonly ratio: number; readonly emittedAt: number } | null;
   readonly overlay: Overlay | null;
   readonly shouldExit: boolean;
 };
@@ -92,6 +138,8 @@ export type Overlay =
   | { readonly type: "model" }
   | { readonly type: "log" }
   | { readonly type: "details" }
+  | { readonly type: "usage" }
+  | { readonly type: "context" }
   | { readonly type: "message"; readonly level: "info" | "warn" | "error"; readonly text: string };
 
 export type Action =
@@ -116,7 +164,18 @@ export type Action =
   | { type: "CLOSE_OVERLAY" }
   | { type: "CLEAR" }
   | { type: "EXIT" }
-  | { type: "INFO"; level: "info" | "warn" | "error"; text: string };
+  | { type: "INFO"; level: "info" | "warn" | "error"; text: string }
+  | { type: "COMPACT_START"; reason: "auto" | "manual" }
+  | {
+      type: "COMPACT_END";
+      reason: "auto" | "manual";
+      summaryTokens: number;
+      freedMessages: number;
+      snapshotPath: string;
+      durationMs: number;
+    }
+  | { type: "CONTEXT_WARNING"; ratio: number }
+  | { type: "HISTORY_CLEARED"; messagesDropped: number };
 
 export function initialState(session: SessionMeta): UiState {
   return {
@@ -127,6 +186,7 @@ export function initialState(session: SessionMeta): UiState {
     turn: 0,
     isAssistantStreaming: false,
     isTurnActive: false,
+    turnStartedAt: null,
     pendingPolicy: null,
     stats: {
       turns: 0,
@@ -136,6 +196,15 @@ export function initialState(session: SessionMeta): UiState {
       toolCalls: 0,
       toolFailures: 0,
     },
+    usage: {
+      sessionStartedAt: Date.now(),
+      lastInputTokens: 0,
+      turnHistory: [],
+      toolUsage: {},
+      turnAnchor: null,
+    },
+    compaction: null,
+    contextWarning: null,
     overlay: null,
     shouldExit: false,
   };
@@ -154,7 +223,18 @@ export function reducer(state: UiState, action: Action): UiState {
         ...state,
         turn,
         isTurnActive: true,
+        turnStartedAt: Date.now(),
         messages: [...state.messages, msg],
+        usage: {
+          ...state.usage,
+          turnAnchor: {
+            tokensIn: state.stats.tokensIn,
+            tokensOut: state.stats.tokensOut,
+            costUsd: state.stats.costUsd,
+            toolCalls: state.stats.toolCalls,
+            toolFailures: state.stats.toolFailures,
+          },
+        },
       };
     }
     case "ASSIST_DELTA": {
@@ -223,8 +303,10 @@ export function reducer(state: UiState, action: Action): UiState {
       };
     }
     case "TOOL_RESULT": {
+      let toolName: string | null = null;
       const messages = state.messages.map((m) => {
         if (m.kind === "tool" && m.id === action.id) {
+          toolName = m.name;
           return {
             ...m,
             status: action.ok ? ("ok" as const) : ("fail" as const),
@@ -234,12 +316,25 @@ export function reducer(state: UiState, action: Action): UiState {
         }
         return m;
       });
+      const toolUsage = { ...state.usage.toolUsage };
+      if (toolName) {
+        const prev = toolUsage[toolName] ?? { count: 0, totalMs: 0, failures: 0 };
+        toolUsage[toolName] = {
+          count: prev.count + 1,
+          totalMs: prev.totalMs + (action.durationMs ?? 0),
+          failures: prev.failures + (action.ok ? 0 : 1),
+        };
+      }
       return {
         ...state,
         messages,
         stats: {
           ...state.stats,
           toolFailures: state.stats.toolFailures + (action.ok ? 0 : 1),
+        },
+        usage: {
+          ...state.usage,
+          toolUsage,
         },
       };
     }
@@ -263,17 +358,44 @@ export function reducer(state: UiState, action: Action): UiState {
           tokensOut: state.stats.tokensOut + action.outputTokens,
           costUsd: state.stats.costUsd + (action.costUsd ?? 0),
         },
+        usage: {
+          ...state.usage,
+          lastInputTokens: action.inputTokens,
+        },
       };
     case "TURN_START":
-      return { ...state, isTurnActive: true };
-    case "TURN_END":
+      return {
+        ...state,
+        isTurnActive: true,
+        turnStartedAt: state.turnStartedAt ?? Date.now(),
+      };
+    case "TURN_END": {
       if (!state.isTurnActive && !state.isAssistantStreaming) return state;
+      const anchor = state.usage.turnAnchor;
+      const nextTurns = state.stats.turns + 1;
+      const turnHistory = anchor
+        ? [
+            ...state.usage.turnHistory,
+            {
+              index: nextTurns,
+              durationMs: state.turnStartedAt ? Date.now() - state.turnStartedAt : 0,
+              tokensIn: state.stats.tokensIn - anchor.tokensIn,
+              tokensOut: state.stats.tokensOut - anchor.tokensOut,
+              costUsd: state.stats.costUsd - anchor.costUsd,
+              toolCalls: state.stats.toolCalls - anchor.toolCalls,
+              toolFailures: state.stats.toolFailures - anchor.toolFailures,
+            } satisfies TurnStat,
+          ]
+        : state.usage.turnHistory;
       return {
         ...state,
         isTurnActive: false,
         isAssistantStreaming: false,
-        stats: { ...state.stats, turns: state.stats.turns + 1 },
+        turnStartedAt: null,
+        stats: { ...state.stats, turns: nextTurns },
+        usage: { ...state.usage, turnHistory, turnAnchor: null },
       };
+    }
     case "POLICY_ASK":
       return { ...state, pendingPolicy: action.request };
     case "POLICY_RESOLVE":
@@ -328,6 +450,62 @@ export function reducer(state: UiState, action: Action): UiState {
         turn: state.turn,
       };
       return { ...state, messages: [...state.messages, msg] };
+    }
+    case "COMPACT_START": {
+      const info: InfoMsg = {
+        kind: "info",
+        id: nextId("i"),
+        level: "info",
+        text:
+          action.reason === "manual"
+            ? "Compacting conversation…"
+            : "Auto-compacting conversation (context nearly full)…",
+        turn: state.turn,
+      };
+      return {
+        ...state,
+        compaction: { phase: "summarizing", reason: action.reason, startedAt: Date.now() },
+        messages: [...state.messages, info],
+      };
+    }
+    case "COMPACT_END": {
+      const info: InfoMsg = {
+        kind: "info",
+        id: nextId("i"),
+        level: "info",
+        text:
+          action.freedMessages > 0
+            ? `Compacted ${action.freedMessages} messages · summary ${action.summaryTokens} tokens · snapshot ${action.snapshotPath}`
+            : `Compaction finished without summarising (snapshot ${action.snapshotPath})`,
+        turn: state.turn,
+      };
+      return {
+        ...state,
+        compaction: null,
+        contextWarning: null,
+        usage: { ...state.usage, lastInputTokens: 0 },
+        messages: [...state.messages, info],
+      };
+    }
+    case "CONTEXT_WARNING":
+      return {
+        ...state,
+        contextWarning: { ratio: action.ratio, emittedAt: Date.now() },
+      };
+    case "HISTORY_CLEARED": {
+      const info: InfoMsg = {
+        kind: "info",
+        id: nextId("i"),
+        level: "info",
+        text: `Cleared ${action.messagesDropped} messages from runtime history.`,
+        turn: state.turn,
+      };
+      return {
+        ...state,
+        messages: [...state.messages, info],
+        contextWarning: null,
+        usage: { ...state.usage, lastInputTokens: 0 },
+      };
     }
     default:
       return state;

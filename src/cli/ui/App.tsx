@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import type { SlashCommandContext } from "./commands.js";
+import { ActivityLine } from "./components/ActivityLine.js";
 import { Header } from "./components/Header.js";
 import { InputPrompt } from "./components/InputPrompt.js";
 import { MessageList } from "./components/MessageList.js";
@@ -28,6 +29,16 @@ export type AppCallbacks = {
   readonly onCancelTurn: () => void;
   /** Resolve a pending policy question. */
   readonly onPolicyResolve: (allow: boolean) => void;
+  /**
+   * Optional — when present, the policy dialog exposes "always allow for
+   * session" and calls this with the tool name so the host can install a
+   * runtime allow rule.
+   */
+  readonly onAlwaysAllow?: (tool: string) => void;
+  /** Push a manual compaction request into the runtime ControlChannel. */
+  readonly onCompact?: (instructions?: string) => void;
+  /** Push a /clear request into the runtime ControlChannel. */
+  readonly onClear?: () => void;
 };
 
 export type AppProps = {
@@ -63,8 +74,10 @@ export function App(props: AppProps): ReactNode {
       dispatch,
       exit: () => dispatch({ type: "EXIT" }),
       details: state.details,
+      ...(props.callbacks.onCompact ? { onCompact: props.callbacks.onCompact } : {}),
+      ...(props.callbacks.onClear ? { onClear: props.callbacks.onClear } : {}),
     }),
-    [state.details],
+    [state.details, props.callbacks.onCompact, props.callbacks.onClear],
   );
 
   const requestExit = useCallback((): void => {
@@ -137,18 +150,24 @@ export function App(props: AppProps): ReactNode {
               dispatch({ type: "POLICY_RESOLVE" });
               props.callbacks.onPolicyResolve(allow);
             }}
+            {...(props.callbacks.onAlwaysAllow
+              ? { onAlwaysAllow: props.callbacks.onAlwaysAllow }
+              : {})}
           />
         )}
         {!state.shouldExit && state.session.mode === "chat" && (
-          <InputPrompt
-            disabled={state.isTurnActive || state.pendingPolicy !== null}
-            history={props.history}
-            slashCtx={slashCtx}
-            onSubmit={props.callbacks.onUserMessage}
-            onCancel={props.callbacks.onCancelTurn}
-            onQuitSignal={handleQuit}
-            dispatch={dispatch}
-          />
+          <>
+            <ActivityLine state={state} />
+            <InputPrompt
+              disabled={state.isTurnActive || state.pendingPolicy !== null}
+              history={props.history}
+              slashCtx={slashCtx}
+              onSubmit={props.callbacks.onUserMessage}
+              onCancel={props.callbacks.onCancelTurn}
+              onQuitSignal={handleQuit}
+              dispatch={dispatch}
+            />
+          </>
         )}
         <StatusBar state={state} />
         {quitHint && (

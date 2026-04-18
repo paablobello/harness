@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { resolveWithinWorkspace } from "../runtime/workspace.js";
 import type { ToolDefinition } from "../types.js";
+import { toUnifiedDiff } from "./diff-util.js";
 
 const input = z.object({
   path: z.string().min(1).describe("Path to the file to edit, relative to workspace root."),
@@ -40,7 +41,13 @@ export const editFileTool: ToolDefinition<z.infer<typeof input>> = {
       }
       await mkdir(dirname(abs), { recursive: true });
       await writeFile(abs, args.new_str, "utf8");
-      return { ok: true, output: `Created ${args.path} (${args.new_str.length} chars).` };
+      const diff = toUnifiedDiff(args.path, "", args.new_str);
+      const header = `Created ${args.path} (${args.new_str.length} chars).`;
+      return {
+        ok: true,
+        output: diff ? `${header}\n${diff}` : header,
+        meta: { created: true, bytes: args.new_str.length },
+      };
     }
 
     let content: string;
@@ -69,9 +76,11 @@ export const editFileTool: ToolDefinition<z.infer<typeof input>> = {
     await writeFile(abs, next, "utf8");
     const before = content.split("\n").length;
     const after = next.split("\n").length;
+    const diff = toUnifiedDiff(args.path, content, next);
+    const header = `Edited ${args.path}: ${before} → ${after} lines.`;
     return {
       ok: true,
-      output: `Edited ${args.path}: ${before} → ${after} lines.`,
+      output: diff ? `${header}\n${diff}` : header,
       meta: { bytesBefore: content.length, bytesAfter: next.length },
     };
   },

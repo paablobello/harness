@@ -60,4 +60,56 @@ describe("dispatchSlash", () => {
     dispatchSlash("/", ctx(dispatch));
     expect(dispatch).toHaveBeenCalledWith({ type: "OPEN_OVERLAY", overlay: { type: "help" } });
   });
+
+  it("/usage opens the usage overlay", () => {
+    const dispatch = vi.fn();
+    const handled = dispatchSlash("/usage", ctx(dispatch));
+    expect(handled).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith({ type: "OPEN_OVERLAY", overlay: { type: "usage" } });
+  });
+
+  it("/context opens the context overlay", () => {
+    const dispatch = vi.fn();
+    const handled = dispatchSlash("/context", ctx(dispatch));
+    expect(handled).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "OPEN_OVERLAY",
+      overlay: { type: "context" },
+    });
+  });
+
+  it("/compact calls onCompact with no instructions when none given", () => {
+    const dispatch = vi.fn();
+    const onCompact = vi.fn();
+    dispatchSlash("/compact", { dispatch, exit: vi.fn(), details: false, onCompact });
+    expect(onCompact).toHaveBeenCalledWith(undefined);
+  });
+
+  it("/compact forwards trimmed instructions to onCompact", () => {
+    const dispatch = vi.fn();
+    const onCompact = vi.fn();
+    dispatchSlash("/compact   focus on auth flow   ", {
+      dispatch,
+      exit: vi.fn(),
+      details: false,
+      onCompact,
+    });
+    expect(onCompact).toHaveBeenCalledWith("focus on auth flow");
+  });
+
+  it("/compact warns when the session has no compaction hook wired", () => {
+    const dispatch = vi.fn();
+    dispatchSlash("/compact", { dispatch, exit: vi.fn(), details: false });
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "INFO", level: "warn" }),
+    );
+  });
+
+  it("/clear dispatches CLEAR and fires onClear so the runtime drops history", () => {
+    const dispatch = vi.fn();
+    const onClear = vi.fn();
+    dispatchSlash("/clear", { dispatch, exit: vi.fn(), details: false, onClear });
+    expect(dispatch).toHaveBeenCalledWith({ type: "CLEAR" });
+    expect(onClear).toHaveBeenCalled();
+  });
 });

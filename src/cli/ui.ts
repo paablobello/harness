@@ -2,6 +2,7 @@ import { basename, relative } from "node:path";
 
 import pc from "picocolors";
 
+import { hasPricing } from "../runtime/cost.js";
 import type { RunSummary } from "../runtime/session.js";
 import type { ModelAdapter, PermissionMode, ToolCall } from "../types.js";
 
@@ -67,7 +68,9 @@ export function printRunSummary(
   summary: RunSummary,
   logPath: string,
 ): void {
-  const cost = summary.totalCostUsd > 0 ? `$${summary.totalCostUsd.toFixed(4)}` : "unknown";
+  const cost = hasPricing(summary.adapter.model)
+    ? `$${summary.totalCostUsd.toFixed(4)}`
+    : "unknown";
   console.log(
     pc.dim(
       `\n${label} done  turns=${summary.turns}  tokens=${summary.totalInputTokens}->${summary.totalOutputTokens}  cost~${cost}`,

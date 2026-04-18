@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
 import type { HookDispatcher, HookPayload, HookPayloadBase } from "../hooks/dispatcher.js";
 import type { PolicyEngine } from "../policy/engine.js";
@@ -12,6 +13,9 @@ import type {
   SpawnSubagentResult,
   ToolCall,
 } from "../types.js";
+import { compactMessages } from "./compactor.js";
+import { classifyContext, DEFAULT_CONTEXT_THRESHOLDS } from "./context-window.js";
+import type { ControlChannel } from "./control.js";
 import { computeCost } from "./cost.js";
 import type { EventSink, HarnessEvent, SessionEndReason } from "./events.js";
 
@@ -45,6 +49,10 @@ export type SessionConfig = {
   subagentDepth?: number;
   /** Max subagent recursion depth. Default 1 (parent may spawn, children may not). */
   maxSubagentDepth?: number;
+  /** Context-window compaction settings. See `contextManagementDefaults()` for defaults. */
+  contextManagement?: ContextManagementConfig;
+  /** UI -> runtime control bus used to trigger `/compact` and `/clear` between turns. */
+  controls?: ControlChannel;
   onAssistantDelta?: (text: string) => void;
   onAssistantMessage?: (text: string) => void;
   onToolCall?: (call: ToolCall) => void;
@@ -57,12 +65,49 @@ export type SessionConfig = {
   }) => void;
   onSensorRun?: (res: { name: string; ok: boolean; message: string }) => void;
   onUsage?: (usage: { inputTokens: number; outputTokens: number; costUsd?: number }) => void;
+  onCompactStart?: (info: { reason: "auto" | "manual"; instructions?: string }) => void;
+  onCompactEnd?: (info: {
+    reason: "auto" | "manual";
+    summaryTokens: number;
+    freedMessages: number;
+    snapshotPath: string;
+    durationMs: number;
+  }) => void;
+  onHistoryCleared?: (info: { messagesDropped: number }) => void;
+  onContextWarning?: (info: {
+    inputTokens: number;
+    contextWindow: number;
+    ratio: number;
+  }) => void;
   signal?: AbortSignal;
+};
+
+export type ContextManagementConfig = {
+  /** Trigger LLM summarisation automatically when tokens cross `compactThreshold`. Default true. */
+  autoCompact?: boolean;
+  /** Emit `ContextWarning` at this ratio of the context window. Default 0.80. */
+  warnThreshold?: number;
+  /** Auto-compact when the last input crosses this ratio. Default 0.90. */
+  compactThreshold?: number;
+  /** Number of trailing messages kept verbatim after compaction. Default 6. */
+  keepLastNTurns?: number;
+  /** Most recent N tool results kept verbatim; older ones are masked. Default 6. */
+  keepLastNToolOutputs?: number;
+  /** Override the summariser system prompt. */
+  summarizerSystem?: string;
+  /** Adapter used for summarisation. Defaults to the session adapter. */
+  summarizerAdapter?: ModelAdapter;
+  /** Directory to write snapshots into. Defaults to `<cwd>/.harness/runs/<runId>/compact`. */
+  snapshotDir?: string;
 };
 
 export type RunSummary = {
   sessionId: string;
   runId: string;
+  /** Provider id + model name the session ran against. Used downstream to
+   *  decide whether a cost of `$0` means "genuinely free" or "model not in
+   *  the pricing table". */
+  adapter: { name: string; model: string };
   turns: number;
   totalInputTokens: number;
   totalOutputTokens: number;
@@ -124,8 +169,17 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   let turns = 0;
   let endReason: SessionEndReason = "eof";
   let lastAssistantMessage = "";
+  let lastInputTokens = 0;
+  let compactionCounter = 0;
+  let warnedAtCurrentZone = false;
   const subagentDepth = cfg.subagentDepth ?? 0;
   const maxSubagentDepth = cfg.maxSubagentDepth ?? 1;
+
+  const ctxCfg = cfg.contextManagement ?? {};
+  const autoCompact = ctxCfg.autoCompact ?? true;
+  const warnThreshold = ctxCfg.warnThreshold ?? DEFAULT_CONTEXT_THRESHOLDS.warn;
+  const compactThreshold = ctxCfg.compactThreshold ?? DEFAULT_CONTEXT_THRESHOLDS.compact;
+  const snapshotDir = ctxCfg.snapshotDir ?? join(cfg.cwd, ".harness", "runs", runId, "compact");
 
   const spawnSubagent: SpawnSubagent = async (opts: SpawnSubagentOptions) => {
     if (subagentDepth >= maxSubagentDepth) {
@@ -249,9 +303,232 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
     }
   };
 
+  const runCompaction = async (
+    reason: "auto" | "manual",
+    instructions: string | undefined,
+  ): Promise<void> => {
+    if (messages.length === 0) return;
+    const hookBasePayload = hookBase("PreCompact");
+    const ctxWindow = classifyContext(lastInputTokens, cfg.adapter.model).contextWindow;
+    if (cfg.hooks) {
+      const hookRes = await cfg.hooks.dispatch({
+        ...hookBasePayload,
+        reason,
+        input_tokens: lastInputTokens,
+        context_window: ctxWindow,
+        threshold: compactThreshold,
+        ...(instructions !== undefined ? { instructions } : {}),
+      });
+      if (hookRes.systemMessage) pendingReminders.push(hookRes.systemMessage);
+      if (hookRes.block) {
+        cfg.sink.write({
+          ...base(),
+          event: "HookBlocked",
+          hook_event_name: "PreCompact",
+          reason: hookRes.reason ?? "blocked by PreCompact hook",
+        });
+        return;
+      }
+    }
+
+    const started = Date.now();
+    const snapshotPath = join(snapshotDir, `${String(compactionCounter + 1).padStart(4, "0")}-${Date.now()}.jsonl`);
+    const compactStart: Extract<HarnessEvent, { event: "CompactStart" }> = {
+      ...base(),
+      event: "CompactStart",
+      reason,
+      input_tokens: lastInputTokens,
+      threshold: compactThreshold,
+      ...(instructions !== undefined ? { instructions } : {}),
+    };
+    cfg.sink.write(compactStart);
+    cfg.onCompactStart?.({ reason, ...(instructions !== undefined ? { instructions } : {}) });
+
+    try {
+      const { messages: next, result } = await compactMessages(
+        messages,
+        {
+          reason,
+          ...(instructions !== undefined ? { instructions } : {}),
+          trigger: {
+            tokens: lastInputTokens,
+            threshold: compactThreshold,
+            contextWindow: ctxWindow,
+          },
+          snapshotPath,
+        },
+        {
+          adapter: ctxCfg.summarizerAdapter ?? cfg.adapter,
+          ...(ctxCfg.keepLastNTurns !== undefined ? { keepLastNTurns: ctxCfg.keepLastNTurns } : {}),
+          ...(ctxCfg.keepLastNToolOutputs !== undefined
+            ? { keepLastNToolOutputs: ctxCfg.keepLastNToolOutputs }
+            : {}),
+          ...(ctxCfg.summarizerSystem !== undefined
+            ? { summarizerSystem: ctxCfg.summarizerSystem }
+            : {}),
+        },
+        signal,
+      );
+      messages.length = 0;
+      messages.push(...next);
+      compactionCounter += 1;
+      if (result.summaryInputTokens > 0 || result.summaryOutputTokens > 0) {
+        totalInput += result.summaryInputTokens;
+        totalOutput += result.summaryOutputTokens;
+        totalCost += result.summaryCostUsd ?? 0;
+        const usage: Extract<HarnessEvent, { event: "Usage" }> = {
+          ...base(),
+          event: "Usage",
+          input_tokens: result.summaryInputTokens,
+          output_tokens: result.summaryOutputTokens,
+        };
+        if (result.summaryCostUsd !== undefined) usage.cost_usd = result.summaryCostUsd;
+        cfg.sink.write(usage);
+        cfg.onUsage?.({
+          inputTokens: result.summaryInputTokens,
+          outputTokens: result.summaryOutputTokens,
+          ...(result.summaryCostUsd !== undefined ? { costUsd: result.summaryCostUsd } : {}),
+        });
+      }
+      // Reset the warn latch AND the token estimate: after compaction the
+      // next turn will report a much lower input token count, and we must not
+      // retrigger auto-compaction on the now-stale `lastInputTokens` value
+      // before the first post-compaction turn has reported real usage.
+      warnedAtCurrentZone = false;
+      lastInputTokens = 0;
+
+      const duration = Date.now() - started;
+      cfg.sink.write({
+        ...base(),
+        event: "CompactEnd",
+        reason,
+        summary_tokens: result.summaryTokens,
+        freed_messages: result.freedMessages,
+        snapshot_path: result.snapshotPath,
+        duration_ms: duration,
+      });
+      cfg.onCompactEnd?.({
+        reason,
+        summaryTokens: result.summaryTokens,
+        freedMessages: result.freedMessages,
+        snapshotPath: result.snapshotPath,
+        durationMs: duration,
+      });
+      if (cfg.hooks) {
+        await cfg.hooks.dispatch({
+          ...hookBase("PostCompact"),
+          reason,
+          summary_tokens: result.summaryTokens,
+          freed_messages: result.freedMessages,
+          snapshot_path: result.snapshotPath,
+        });
+      }
+    } catch (err) {
+      // Compaction is best-effort: if it fails, keep going with the existing
+      // messages. Emit an error-flavoured CompactEnd with freed_messages = 0
+      // so observers know we tried and failed.
+      const duration = Date.now() - started;
+      cfg.sink.write({
+        ...base(),
+        event: "CompactEnd",
+        reason,
+        summary_tokens: 0,
+        freed_messages: 0,
+        snapshot_path: snapshotPath,
+        duration_ms: duration,
+      });
+      cfg.onCompactEnd?.({
+        reason,
+        summaryTokens: 0,
+        freedMessages: 0,
+        snapshotPath,
+        durationMs: duration,
+      });
+      cfg.sink.write({
+        ...base(),
+        event: "HookBlocked",
+        hook_event_name: "PostCompact",
+        reason: `compaction failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  };
+
+  const clearHistory = (): void => {
+    if (messages.length === 0) return;
+    const dropped = messages.length;
+    messages.length = 0;
+    warnedAtCurrentZone = false;
+    lastInputTokens = 0;
+    cfg.sink.write({ ...base(), event: "HistoryCleared", messages_dropped: dropped });
+    cfg.onHistoryCleared?.({ messagesDropped: dropped });
+  };
+
+  const drainControls = async (): Promise<void> => {
+    if (!cfg.controls) return;
+    let control = cfg.controls.poll();
+    while (control) {
+      if (control.type === "compact") {
+        await runCompaction("manual", control.instructions);
+      } else {
+        clearHistory();
+      }
+      control = cfg.controls.poll();
+    }
+  };
+
+  const maybeAutoCompact = async (): Promise<void> => {
+    const classified = classifyContext(lastInputTokens, cfg.adapter.model, {
+      warn: warnThreshold,
+      compact: compactThreshold,
+    });
+    if (classified.zone === "unknown") return;
+    // Warnings are emitted regardless of `autoCompact`: the user opted out of
+    // automatic compaction but still deserves a heads-up that the window is
+    // filling up so they can trigger `/compact` manually.
+    if (classified.zone === "warn" && !warnedAtCurrentZone) {
+      warnedAtCurrentZone = true;
+      cfg.sink.write({
+        ...base(),
+        event: "ContextWarning",
+        input_tokens: classified.lastInputTokens,
+        context_window: classified.contextWindow ?? 0,
+        ratio: classified.ratio ?? 0,
+      });
+      cfg.onContextWarning?.({
+        inputTokens: classified.lastInputTokens,
+        contextWindow: classified.contextWindow ?? 0,
+        ratio: classified.ratio ?? 0,
+      });
+    }
+    if (classified.zone === "critical" && autoCompact) {
+      await runCompaction("auto", undefined);
+    }
+  };
+
+  let pendingInput: Promise<string | null> | null = null;
+  const waitForUserInput = async (): Promise<string | null> => {
+    while (true) {
+      await drainControls();
+      await maybeAutoCompact();
+      if (!cfg.controls) return cfg.input.next();
+
+      pendingInput ??= cfg.input.next();
+      const controlWaiter = cfg.controls.wait();
+      const winner = await Promise.race([
+        pendingInput.then((value) => ({ type: "input" as const, value })),
+        controlWaiter.promise.then(() => ({ type: "control" as const })),
+      ]);
+      if (winner.type === "input") {
+        controlWaiter.cancel();
+        pendingInput = null;
+        return winner.value;
+      }
+    }
+  };
+
   try {
     userLoop: while (true) {
-      const userInput = await cfg.input.next();
+      const userInput = await waitForUserInput();
       if (userInput === null) {
         endReason = "user_exit";
         break;
@@ -311,6 +588,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               event.costUsd ??
               computeCost(cfg.adapter.model, event.inputTokens, event.outputTokens);
             lastUsage = { input: event.inputTokens, output: event.outputTokens, cost };
+            lastInputTokens = event.inputTokens;
           } else if (event.type === "stop") {
             stopReason = event.reason;
             errorMsg = event.error;
@@ -633,6 +911,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   return {
     sessionId,
     runId,
+    adapter: { name: cfg.adapter.name, model: cfg.adapter.model },
     turns,
     totalInputTokens: totalInput,
     totalOutputTokens: totalOutput,

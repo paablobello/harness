@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { render, type Instance } from "ink";
 
 import type { AskPrompt } from "../../policy/engine.js";
+import { ControlChannel } from "../../runtime/control.js";
 import type { EventSink } from "../../runtime/events.js";
 import { runSession, type RunSummary } from "../../runtime/session.js";
 import type { HarnessConfig } from "../../config/harness-config.js";
@@ -111,6 +112,10 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
       dispatchRef.current?.({ type: "POLICY_ASK", request: payload });
     });
 
+  const policy = opts.policyFactory ? opts.policyFactory(ask) : undefined;
+
+  const controls = new ControlChannel();
+
   const callbacks: AppCallbacks = {
     onUserMessage: pushUserInput,
     onCancelTurn: () => {
@@ -121,6 +126,26 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
       pendingPolicyResolve = null;
       r?.(allow);
     },
+    onCompact: (instructions) => {
+      controls.push(
+        instructions !== undefined ? { type: "compact", instructions } : { type: "compact" },
+      );
+    },
+    onClear: () => {
+      controls.push({ type: "clear" });
+    },
+    ...(policy
+      ? {
+          onAlwaysAllow: (tool: string) => {
+            policy.addRule({ match: { tool }, decision: "allow" }, "first");
+            dispatchRef.current?.({
+              type: "INFO",
+              level: "info",
+              text: `policy: always allow ${tool} for this session`,
+            });
+          },
+        }
+      : {}),
   };
 
   const appElement = createElement(App, {
@@ -139,7 +164,6 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
   await new Promise<void>((r) => setImmediate(r));
 
   try {
-    const policy = opts.policyFactory ? opts.policyFactory(ask) : undefined;
     const summary = await runSession({
       adapter: opts.adapter,
       system: opts.system,
@@ -157,6 +181,10 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
       ...(opts.harnessConfig?.maxSubagentDepth !== undefined
         ? { maxSubagentDepth: opts.harnessConfig.maxSubagentDepth }
         : {}),
+      ...(opts.harnessConfig?.contextManagement
+        ? { contextManagement: opts.harnessConfig.contextManagement }
+        : {}),
+      controls,
       input: {
         next: nextUserInput,
       },
@@ -186,6 +214,23 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
           inputTokens: u.inputTokens,
           outputTokens: u.outputTokens,
           ...(u.costUsd !== undefined ? { costUsd: u.costUsd } : {}),
+        }),
+      onCompactStart: (info) => dispatchRef.current?.({ type: "COMPACT_START", reason: info.reason }),
+      onCompactEnd: (info) =>
+        dispatchRef.current?.({
+          type: "COMPACT_END",
+          reason: info.reason,
+          summaryTokens: info.summaryTokens,
+          freedMessages: info.freedMessages,
+          snapshotPath: info.snapshotPath,
+          durationMs: info.durationMs,
+        }),
+      onContextWarning: (info) =>
+        dispatchRef.current?.({ type: "CONTEXT_WARNING", ratio: info.ratio }),
+      onHistoryCleared: (info) =>
+        dispatchRef.current?.({
+          type: "HISTORY_CLEARED",
+          messagesDropped: info.messagesDropped,
         }),
     });
     return summary;

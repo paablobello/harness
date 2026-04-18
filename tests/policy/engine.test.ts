@@ -73,6 +73,23 @@ describe("PolicyEngine (defaults)", () => {
     expect(ask).not.toHaveBeenCalled();
   });
 
+  it("addRule with first position overrides matching rules thereafter", async () => {
+    const ask = vi.fn(async () => false);
+    const engine = new PolicyEngine({ rules: defaultPolicy, ask });
+    // Without runtime rule, asks would be needed for safe run_command:
+    engine.addRule({ match: { tool: "run_command" }, decision: "allow" }, "first");
+    const decision = await engine.decide({ tool: runTool, input: { command: "node -v" } });
+    expect(decision.decision).toBe("allow");
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("addRule does not override an explicit deny that comes earlier", async () => {
+    const engine = new PolicyEngine({ rules: defaultPolicy });
+    engine.addRule({ match: { tool: "run_command" }, decision: "allow" }, "last");
+    const decision = await engine.decide({ tool: runTool, input: { command: "rm -rf /" } });
+    expect(decision.decision).toBe("deny");
+  });
+
   it("plan mode denies writes and executes", async () => {
     const engine = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
     expect((await engine.decide({ tool: editTool, input: {} })).decision).toBe("deny");
