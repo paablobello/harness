@@ -2,11 +2,13 @@ export { VERSION } from "./version.js";
 
 // Core types — stable SDK surface
 export type {
+  AskPlan,
   ConversationMessage,
   ModelAdapter,
   ModelEvent,
   ModelTurnInput,
   PermissionMode,
+  PlanDecision,
   PolicyDecision,
   PolicyRule,
   StopReason,
@@ -47,6 +49,7 @@ export { grepFilesTool } from "./tools/grep-files.js";
 export { editFileTool } from "./tools/edit-file.js";
 export { applyPatchTool } from "./tools/apply-patch.js";
 export { runCommandTool } from "./tools/run-command.js";
+export { exitPlanModeTool } from "./tools/exit-plan-mode.js";
 
 // Policy
 export { PolicyEngine } from "./policy/engine.js";

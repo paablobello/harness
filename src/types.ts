@@ -54,7 +54,38 @@ export type ToolContext = {
   runId: string;
   /** Provided by the runtime when subagents are enabled; lets a tool spawn a child session. */
   spawnSubagent?: SpawnSubagent;
+  /**
+   * Injected by the runtime when plan mode is wired to a UI. Presents the plan
+   * to the user and resolves with their decision. Implemented by
+   * `exit_plan_mode` to orchestrate approval/rejection.
+   */
+  askPlan?: AskPlan;
+  /**
+   * Injected by the runtime. Lets `exit_plan_mode` (and tests) transition the
+   * policy engine between permission modes directly so subsequent tool calls
+   * within the same turn observe the new mode.
+   */
+  setPermissionMode?: (mode: PermissionMode, source?: "user" | "tool" | "system") => void;
+  /** Injected by the runtime. The permission mode active before entering plan mode. */
+  previousPermissionMode?: PermissionMode;
 };
+
+export type PlanDecision =
+  | {
+      readonly approved: true;
+      /**
+       * Present when the user opened `$EDITOR` from the approval dialog and
+       * changed the plan. When set, `exit_plan_mode` persists this text
+       * instead of the model's original `plan` input.
+       */
+      readonly editedPlan?: string;
+    }
+  | { readonly approved: false; readonly feedback: string };
+
+export type AskPlan = (req: {
+  readonly plan: string;
+  readonly allowedTools?: readonly string[];
+}) => Promise<PlanDecision>;
 
 export type SpawnSubagentOptions = {
   prompt: string;

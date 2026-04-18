@@ -120,6 +120,39 @@ describe("UI state integration with runSession", () => {
     expect(state.stats.toolFailures).toBe(0);
   });
 
+  it("renders model errors as info instead of requiring the session to exit", async () => {
+    const sink = new MemoryEventSink();
+    const adapter = createScriptedAdapter([[{ type: "stop", reason: "error", error: "bad model" }]]);
+    let state = initialState(SESSION);
+    const dispatch = (action: Action): void => {
+      state = reducer(state, action);
+    };
+    let delivered = false;
+
+    await runSession({
+      adapter,
+      system: "t",
+      cwd: "/tmp",
+      sink,
+      input: {
+        async next() {
+          if (delivered) return null;
+          delivered = true;
+          dispatch({ type: "USER_SENT", text: "como ves en proyecto?" });
+          return "como ves en proyecto?";
+        },
+      },
+      continueOnModelError: true,
+      onModelError: (error) =>
+        dispatch({ type: "INFO", level: "error", text: `Model error: ${error}` }),
+    });
+
+    const info = state.messages.find((m) => m.kind === "info");
+    expect(info && info.kind === "info" && info.text).toContain("bad model");
+    const end = sink.events.find((e) => e.event === "SessionEnd");
+    expect(end && "end_reason" in end && end.end_reason).toBe("user_exit");
+  });
+
   // Keeps vitest happy by referencing MemoryEventSink in this file
   // (ensures the import is used even in coverage configurations that
   // strip imports).

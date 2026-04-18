@@ -93,4 +93,33 @@ describe("runSession", () => {
     const end = sink.events.find((e) => e.event === "SessionEnd");
     expect(end && "end_reason" in end && end.end_reason).toBe("error");
   });
+
+  it("can continue after adapter stop=error when configured for interactive chat", async () => {
+    const sink = new MemoryEventSink();
+    const errors: string[] = [];
+    const adapter = createScriptedAdapter([
+      [{ type: "stop", reason: "error", error: "provider unavailable" }],
+      [
+        { type: "text_delta", text: "Recovered" },
+        { type: "usage", inputTokens: 5, outputTokens: 1 },
+        { type: "stop", reason: "end_turn" },
+      ],
+    ]);
+
+    const summary = await runSession({
+      adapter,
+      system: "test",
+      cwd: "/tmp",
+      sink,
+      input: queuedInput(["como ves en proyecto?", "otra vez"]),
+      continueOnModelError: true,
+      onModelError: (error) => errors.push(error),
+    });
+
+    expect(errors).toEqual(["provider unavailable"]);
+    expect(summary.turns).toBe(2);
+    expect(sink.events.filter((e) => e.event === "UserPromptSubmit")).toHaveLength(2);
+    const end = sink.events.find((e) => e.event === "SessionEnd");
+    expect(end && "end_reason" in end && end.end_reason).toBe("user_exit");
+  });
 });

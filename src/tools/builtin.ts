@@ -1,5 +1,6 @@
 import { applyPatchTool } from "./apply-patch.js";
 import { editFileTool } from "./edit-file.js";
+import { exitPlanModeTool } from "./exit-plan-mode.js";
 import { grepFilesTool } from "./grep-files.js";
 import { listFilesTool } from "./list-files.js";
 import { readFileTool } from "./read-file.js";
@@ -16,12 +17,14 @@ export function createBuiltinRegistry(): ToolRegistry {
   reg.register(applyPatchTool);
   reg.register(runCommandTool);
   reg.register(subagentTool);
+  reg.register(exitPlanModeTool);
   return reg;
 }
 
 export {
   applyPatchTool,
   editFileTool,
+  exitPlanModeTool,
   grepFilesTool,
   listFilesTool,
   readFileTool,

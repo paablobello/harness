@@ -321,9 +321,55 @@ describe("runSession + context compaction", () => {
       });
 
       expect(onCompactEnd).toHaveBeenCalledWith(
-        expect.objectContaining({ reason: "auto", freedMessages: 0, summaryTokens: 0 }),
+        expect.objectContaining({
+          reason: "auto",
+          freedMessages: 0,
+          summaryTokens: 0,
+          error: expect.any(String),
+        }),
       );
-      expect(sink.events.some((e) => e.event === "CompactEnd")).toBe(true);
+      const end = sink.events.find((e) => e.event === "CompactEnd") as
+        | { event: "CompactEnd"; error?: string }
+        | undefined;
+      expect(end?.error).toMatch(/not-a-directory/);
+      expect(
+        sink.events.some(
+          (e) =>
+            e.event === "HookBlocked" &&
+            "hook_event_name" in e &&
+            e.hook_event_name === "PostCompact",
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not retry auto compaction every turn after a deterministic failure", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "harness-sc-"));
+    try {
+      const sink = new MemoryEventSink();
+      const blocker = join(tmp, "not-a-directory");
+      await writeFile(blocker, "x", "utf8");
+      const adapter = scriptedAdapterWithUsage([
+        { text: "big", inputTokens: 195_000 },
+        { text: "still big", inputTokens: 195_000 },
+      ]);
+      await runSession({
+        adapter,
+        system: "t",
+        cwd: tmp,
+        sink,
+        input: queuedInput(["a", "b"]),
+        contextManagement: { snapshotDir: blocker },
+      });
+
+      const compactStarts = sink.events.filter((e) => e.event === "CompactStart");
+      expect(compactStarts).toHaveLength(1);
+      const compactEnd = sink.events.find((e) => e.event === "CompactEnd") as
+        | { event: "CompactEnd"; error?: string }
+        | undefined;
+      expect(compactEnd?.error).toMatch(/not-a-directory/);
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }

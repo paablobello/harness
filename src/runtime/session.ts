@@ -6,8 +6,10 @@ import type { PolicyEngine } from "../policy/engine.js";
 import type { Sensor, SensorContext } from "../sensors/types.js";
 import { ToolRegistry } from "../tools/registry.js";
 import type {
+  AskPlan,
   ConversationMessage,
   ModelAdapter,
+  PermissionMode,
   SpawnSubagent,
   SpawnSubagentOptions,
   SpawnSubagentResult,
@@ -18,6 +20,7 @@ import { classifyContext, DEFAULT_CONTEXT_THRESHOLDS } from "./context-window.js
 import type { ControlChannel } from "./control.js";
 import { computeCost } from "./cost.js";
 import type { EventSink, HarnessEvent, SessionEndReason } from "./events.js";
+import { PLAN_ENTRY_REMINDER, PLAN_EXIT_REMINDER } from "./plan-mode-prompts.js";
 
 /**
  * An `UserInputStream` drives the turn loop. Returning `null` means the user
@@ -65,6 +68,9 @@ export type SessionConfig = {
   }) => void;
   onSensorRun?: (res: { name: string; ok: boolean; message: string }) => void;
   onUsage?: (usage: { inputTokens: number; outputTokens: number; costUsd?: number }) => void;
+  onModelError?: (error: string) => void;
+  /** Keep interactive sessions alive after provider/model errors. Default false for one-shot runs. */
+  continueOnModelError?: boolean;
   onCompactStart?: (info: { reason: "auto" | "manual"; instructions?: string }) => void;
   onCompactEnd?: (info: {
     reason: "auto" | "manual";
@@ -72,6 +78,7 @@ export type SessionConfig = {
     freedMessages: number;
     snapshotPath: string;
     durationMs: number;
+    error?: string;
   }) => void;
   onHistoryCleared?: (info: { messagesDropped: number }) => void;
   onContextWarning?: (info: {
@@ -79,6 +86,13 @@ export type SessionConfig = {
     contextWindow: number;
     ratio: number;
   }) => void;
+  onPermissionModeChanged?: (info: {
+    from: PermissionMode;
+    to: PermissionMode;
+    source: "user" | "tool" | "system";
+  }) => void;
+  /** UI-provided plan approval prompt. Only wired when plan mode is enabled. */
+  askPlan?: AskPlan;
   signal?: AbortSignal;
 };
 
@@ -172,6 +186,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   let lastInputTokens = 0;
   let compactionCounter = 0;
   let warnedAtCurrentZone = false;
+  let suppressAutoCompactAfterFailure = false;
   const subagentDepth = cfg.subagentDepth ?? 0;
   const maxSubagentDepth = cfg.maxSubagentDepth ?? 1;
 
@@ -180,6 +195,41 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   const warnThreshold = ctxCfg.warnThreshold ?? DEFAULT_CONTEXT_THRESHOLDS.warn;
   const compactThreshold = ctxCfg.compactThreshold ?? DEFAULT_CONTEXT_THRESHOLDS.compact;
   const snapshotDir = ctxCfg.snapshotDir ?? join(cfg.cwd, ".harness", "runs", runId, "compact");
+
+  // Remembers the permission mode we were in before entering plan, so
+  // `exit_plan_mode` can restore it (default, acceptEdits, …). If the session
+  // *starts* in plan mode (via `--permission-mode plan`) we have no record of
+  // a prior mode, so we fall back to "default" on exit.
+  const startingMode = cfg.policy?.getMode() ?? "default";
+  let previousPermissionMode: PermissionMode =
+    startingMode === "plan" ? "default" : startingMode;
+  if (startingMode === "plan") {
+    pendingReminders.push(PLAN_ENTRY_REMINDER);
+  }
+
+  const applyPermissionMode = (
+    nextMode: PermissionMode,
+    source: "user" | "tool" | "system",
+  ): void => {
+    if (!cfg.policy) return;
+    const fromMode = cfg.policy.getMode();
+    if (fromMode === nextMode) return;
+    if (fromMode !== "plan" && nextMode === "plan") {
+      previousPermissionMode = fromMode;
+      pendingReminders.push(PLAN_ENTRY_REMINDER);
+    } else if (fromMode === "plan" && nextMode !== "plan") {
+      pendingReminders.push(PLAN_EXIT_REMINDER);
+    }
+    cfg.policy.setMode(nextMode);
+    cfg.sink.write({
+      ...base(),
+      event: "PermissionModeChanged",
+      from: fromMode,
+      to: nextMode,
+      source,
+    });
+    cfg.onPermissionModeChanged?.({ from: fromMode, to: nextMode, source });
+  };
 
   const spawnSubagent: SpawnSubagent = async (opts: SpawnSubagentOptions) => {
     if (subagentDepth >= maxSubagentDepth) {
@@ -395,6 +445,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
       // retrigger auto-compaction on the now-stale `lastInputTokens` value
       // before the first post-compaction turn has reported real usage.
       warnedAtCurrentZone = false;
+      suppressAutoCompactAfterFailure = false;
       lastInputTokens = 0;
 
       const duration = Date.now() - started;
@@ -428,6 +479,8 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
       // messages. Emit an error-flavoured CompactEnd with freed_messages = 0
       // so observers know we tried and failed.
       const duration = Date.now() - started;
+      const error = err instanceof Error ? err.message : String(err);
+      suppressAutoCompactAfterFailure = true;
       cfg.sink.write({
         ...base(),
         event: "CompactEnd",
@@ -436,6 +489,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         freed_messages: 0,
         snapshot_path: snapshotPath,
         duration_ms: duration,
+        error,
       });
       cfg.onCompactEnd?.({
         reason,
@@ -443,12 +497,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         freedMessages: 0,
         snapshotPath,
         durationMs: duration,
-      });
-      cfg.sink.write({
-        ...base(),
-        event: "HookBlocked",
-        hook_event_name: "PostCompact",
-        reason: `compaction failed: ${err instanceof Error ? err.message : String(err)}`,
+        error,
       });
     }
   };
@@ -458,6 +507,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
     const dropped = messages.length;
     messages.length = 0;
     warnedAtCurrentZone = false;
+    suppressAutoCompactAfterFailure = false;
     lastInputTokens = 0;
     cfg.sink.write({ ...base(), event: "HistoryCleared", messages_dropped: dropped });
     cfg.onHistoryCleared?.({ messagesDropped: dropped });
@@ -469,8 +519,10 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
     while (control) {
       if (control.type === "compact") {
         await runCompaction("manual", control.instructions);
-      } else {
+      } else if (control.type === "clear") {
         clearHistory();
+      } else if (control.type === "set_mode") {
+        applyPermissionMode(control.mode, "user");
       }
       control = cfg.controls.poll();
     }
@@ -482,6 +534,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
       compact: compactThreshold,
     });
     if (classified.zone === "unknown") return;
+    if (classified.zone !== "critical") suppressAutoCompactAfterFailure = false;
     // Warnings are emitted regardless of `autoCompact`: the user opted out of
     // automatic compaction but still deserves a heads-up that the window is
     // filling up so they can trigger `/compact` manually.
@@ -500,7 +553,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         ratio: classified.ratio ?? 0,
       });
     }
-    if (classified.zone === "critical" && autoCompact) {
+    if (classified.zone === "critical" && autoCompact && !suppressAutoCompactAfterFailure) {
       await runCompaction("auto", undefined);
     }
   };
@@ -641,6 +694,11 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         turns += 1;
 
         if (stopReason === "error") {
+          cfg.onModelError?.(errorMsg ?? "model call failed");
+          if (cfg.continueOnModelError) {
+            await runSensors("after_turn");
+            break modelLoop;
+          }
           endReason = "error";
           break userLoop;
         }
@@ -820,6 +878,11 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               sessionId,
               runId,
               spawnSubagent,
+              ...(cfg.askPlan ? { askPlan: cfg.askPlan } : {}),
+              setPermissionMode: (mode, source = "tool") => {
+                applyPermissionMode(mode, source);
+              },
+              previousPermissionMode,
             });
             const duration = Date.now() - started;
             cfg.sink.write({

@@ -53,6 +53,12 @@ export type PolicyRequest = {
   readonly reason?: string;
 };
 
+export type PlanRequest = {
+  readonly id: string;
+  readonly plan: string;
+  readonly allowedTools?: readonly string[];
+};
+
 export type SessionMeta = {
   readonly mode: "chat" | "run";
   readonly adapter: Pick<ModelAdapter, "name" | "model">;
@@ -104,6 +110,13 @@ export type CompactionState = {
 
 export type UiState = {
   readonly session: SessionMeta;
+  /**
+   * Mutable current permission mode. Seeded from `session.permissionMode` on
+   * init but updated by Shift+Tab and by `PermissionModeChanged` events from
+   * the runtime (e.g. after `exit_plan_mode` approval). The `session` field
+   * stays as the startup snapshot for the overlay.
+   */
+  readonly permissionMode: PermissionMode;
   readonly details: boolean;
   readonly messages: readonly Message[];
   readonly focusedToolId: string | null;
@@ -112,6 +125,7 @@ export type UiState = {
   readonly isTurnActive: boolean;
   readonly turnStartedAt: number | null;
   readonly pendingPolicy: PolicyRequest | null;
+  readonly pendingPlan: PlanRequest | null;
   readonly stats: {
     readonly turns: number;
     readonly tokensIn: number;
@@ -157,6 +171,9 @@ export type Action =
   | { type: "TURN_END" }
   | { type: "POLICY_ASK"; request: PolicyRequest }
   | { type: "POLICY_RESOLVE" }
+  | { type: "PLAN_ASK"; request: PlanRequest }
+  | { type: "PLAN_RESOLVE" }
+  | { type: "SET_PERMISSION_MODE"; mode: PermissionMode }
   | { type: "TOGGLE_EXPAND"; id: string }
   | { type: "FOCUS_TOOL"; direction: "next" | "prev" }
   | { type: "SET_DETAILS"; value: boolean }
@@ -180,6 +197,7 @@ export type Action =
 export function initialState(session: SessionMeta): UiState {
   return {
     session,
+    permissionMode: session.permissionMode,
     details: false,
     messages: [],
     focusedToolId: null,
@@ -188,6 +206,7 @@ export function initialState(session: SessionMeta): UiState {
     isTurnActive: false,
     turnStartedAt: null,
     pendingPolicy: null,
+    pendingPlan: null,
     stats: {
       turns: 0,
       tokensIn: 0,
@@ -400,6 +419,13 @@ export function reducer(state: UiState, action: Action): UiState {
       return { ...state, pendingPolicy: action.request };
     case "POLICY_RESOLVE":
       return { ...state, pendingPolicy: null };
+    case "PLAN_ASK":
+      return { ...state, pendingPlan: action.request };
+    case "PLAN_RESOLVE":
+      return { ...state, pendingPlan: null };
+    case "SET_PERMISSION_MODE":
+      if (state.permissionMode === action.mode) return state;
+      return { ...state, permissionMode: action.mode };
     case "TOGGLE_EXPAND": {
       const messages = state.messages.map((m) =>
         m.kind === "tool" && m.id === action.id ? { ...m, expanded: !m.expanded } : m,

@@ -1,15 +1,23 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it } from "vitest";
 
+import { App, type AppCallbacks } from "../../../src/cli/ui/App.js";
 import { ActivityLine } from "../../../src/cli/ui/components/ActivityLine.js";
 import { AssistantMessage } from "../../../src/cli/ui/components/AssistantMessage.js";
 import { Overlay } from "../../../src/cli/ui/components/Overlay.js";
+import { PlanApprovalDialog } from "../../../src/cli/ui/components/PlanApprovalDialog.js";
 import { PolicyDialog } from "../../../src/cli/ui/components/PolicyDialog.js";
 import { StatusBar } from "../../../src/cli/ui/components/StatusBar.js";
 import { SuggestionsPanel } from "../../../src/cli/ui/components/SuggestionsPanel.js";
 import { ToolBlock } from "../../../src/cli/ui/components/ToolBlock.js";
 import { filterCommands } from "../../../src/cli/ui/commands.js";
-import { initialState, type SessionMeta, type UiState } from "../../../src/cli/ui/state.js";
+import {
+  initialState,
+  reducer,
+  type Action,
+  type SessionMeta,
+  type UiState,
+} from "../../../src/cli/ui/state.js";
 
 describe("ToolBlock", () => {
   it("renders a running tool with spinner and input summary", () => {
@@ -468,6 +476,266 @@ describe("ActivityLine", () => {
   });
 });
 
+describe("StatusBar — plan mode", () => {
+  const session: SessionMeta = {
+    mode: "chat",
+    adapter: { name: "openai", model: "gpt-5.4" },
+    cwd: "/tmp",
+    logPath: "/tmp/log.jsonl",
+    configPath: null,
+    permissionMode: "default",
+    withTools: true,
+    toolCount: 0,
+  };
+
+  it("paints the mode segment as '⏸ plan' when permissionMode is plan", () => {
+    const base = initialState(session);
+    const s: UiState = { ...base, permissionMode: "plan" };
+    const { lastFrame } = render(<StatusBar state={s} />);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("plan");
+    expect(frame).toContain("⏸");
+  });
+
+  it("shows the plain mode name when not in plan", () => {
+    const s = initialState(session);
+    const { lastFrame } = render(<StatusBar state={s} />);
+    expect(lastFrame() ?? "").toContain("default");
+  });
+});
+
+describe("UiState reducer — plan mode actions", () => {
+  const session: SessionMeta = {
+    mode: "chat",
+    adapter: { name: "fake", model: "fake-1" },
+    cwd: "/tmp",
+    logPath: "/tmp/log.jsonl",
+    configPath: null,
+    permissionMode: "default",
+    withTools: false,
+    toolCount: 0,
+  };
+
+  it("SET_PERMISSION_MODE toggles between default and plan", () => {
+    let state = initialState(session);
+    expect(state.permissionMode).toBe("default");
+    state = reducer(state, { type: "SET_PERMISSION_MODE", mode: "plan" });
+    expect(state.permissionMode).toBe("plan");
+    state = reducer(state, { type: "SET_PERMISSION_MODE", mode: "default" });
+    expect(state.permissionMode).toBe("default");
+  });
+
+  it("SET_PERMISSION_MODE returns same reference when already in target mode", () => {
+    const state = initialState(session);
+    const next = reducer(state, { type: "SET_PERMISSION_MODE", mode: "default" });
+    expect(next).toBe(state);
+  });
+
+  it("PLAN_ASK stores the pending plan and PLAN_RESOLVE clears it", () => {
+    let state = initialState(session);
+    state = reducer(state, {
+      type: "PLAN_ASK",
+      request: { id: "p1", plan: "# Plan\n\nStep 1" },
+    });
+    expect(state.pendingPlan).toMatchObject({ id: "p1" });
+    state = reducer(state, { type: "PLAN_RESOLVE" });
+    expect(state.pendingPlan).toBeNull();
+  });
+});
+
+describe("PlanApprovalDialog", () => {
+  it("renders the plan body inside the approval chrome with step/word meta", () => {
+    const { lastFrame } = render(
+      <PlanApprovalDialog
+        request={{
+          id: "p1",
+          plan: "# Refactor Auth\n\n1. Extract helpers\n2. Update callers",
+        }}
+        onResolve={() => undefined}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("plan ready for approval");
+    expect(frame).toContain("⏸ plan mode");
+    expect(frame).toContain("2 steps");
+    expect(frame).toContain("Refactor Auth");
+    expect(frame).toContain("approve");
+    expect(frame).toContain("reject");
+    expect(frame).toContain("Esc cancel");
+  });
+
+  it("surfaces a file-ref count when the plan mentions paths", () => {
+    const { lastFrame } = render(
+      <PlanApprovalDialog
+        request={{
+          id: "p2",
+          plan:
+            "# Plan\n\n1. Edit `src/a.ts` and `src/b.tsx`\n2. Update tests/a.test.ts\n3. Ship",
+        }}
+        onResolve={() => undefined}
+      />,
+    );
+    expect(lastFrame() ?? "").toContain("3 files");
+  });
+
+  it("collapses long plans with a 'N more lines' indicator", () => {
+    const body = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
+    const { lastFrame } = render(
+      <PlanApprovalDialog
+        request={{ id: "p3", plan: `# Big\n\n${body}` }}
+        onResolve={() => undefined}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("line 1");
+    expect(frame).toMatch(/more lines hidden/);
+    expect(frame).not.toContain("line 40");
+  });
+
+  it("expands the plan when the user presses 'v' and toggles back on a second press", async () => {
+    const body = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
+    const { stdin, lastFrame } = render(
+      <PlanApprovalDialog
+        request={{ id: "p5", plan: `# Big\n\n${body}` }}
+        onResolve={() => undefined}
+      />,
+    );
+    // Initially collapsed.
+    expect(lastFrame() ?? "").not.toContain("line 40");
+
+    stdin.write("v");
+    await new Promise((r) => setTimeout(r, 20));
+    const expanded = lastFrame() ?? "";
+    expect(expanded).toContain("line 40");
+    expect(expanded).toContain("full view");
+    expect(expanded).toContain("collapse");
+
+    stdin.write("v");
+    await new Promise((r) => setTimeout(r, 20));
+    const collapsed = lastFrame() ?? "";
+    expect(collapsed).not.toContain("line 40");
+    expect(collapsed).toContain("expand");
+  });
+
+  it("exposes an 'edit in $EDITOR' hotkey on the review rail", () => {
+    const { lastFrame } = render(
+      <PlanApprovalDialog
+        request={{ id: "p6", plan: "# Plan\n\n1. Step one\n2. Step two" }}
+        onResolve={() => undefined}
+      />,
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("edit in $EDITOR");
+  });
+
+  it("switches to the framed feedback stage when the user presses 'r'", async () => {
+    const { stdin, lastFrame } = render(
+      <PlanApprovalDialog
+        request={{ id: "p4", plan: "# Plan Title\n\n1. Step" }}
+        onResolve={() => undefined}
+      />,
+    );
+    stdin.write("r");
+    await new Promise((r) => setTimeout(r, 20));
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("reject plan");
+    expect(frame).toContain("feedback");
+    expect(frame).toContain("Plan Title");
+    expect(frame).toContain("submit");
+    expect(frame).toContain("back to review");
+  });
+
+  it("resolves approved:true when user presses 'a'", async () => {
+    let decision: { approved: boolean; feedback?: string } | null = null;
+    const { stdin } = render(
+      <PlanApprovalDialog
+        request={{ id: "p1", plan: "# Plan\n\nDo the thing please" }}
+        onResolve={(d) => {
+          decision = d;
+        }}
+      />,
+    );
+    stdin.write("a");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(decision).toEqual({ approved: true });
+  });
+
+  it("collects feedback when the user rejects the plan", async () => {
+    let decision: { approved: boolean; feedback?: string } | null = null;
+    const { stdin } = render(
+      <PlanApprovalDialog
+        request={{ id: "p1", plan: "# Plan\n\nSome plan content here" }}
+        onResolve={(d) => {
+          decision = d;
+        }}
+      />,
+    );
+    stdin.write("r");
+    await new Promise((r) => setTimeout(r, 10));
+    stdin.write("missing tests");
+    await new Promise((r) => setTimeout(r, 10));
+    stdin.write("\r");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(decision).toMatchObject({ approved: false, feedback: "missing tests" });
+  });
+});
+
+describe("App — plan mode toggle", () => {
+  const session: SessionMeta = {
+    mode: "chat",
+    adapter: { name: "fake", model: "fake-1" },
+    cwd: "/tmp",
+    logPath: "/tmp/log.jsonl",
+    configPath: null,
+    permissionMode: "default",
+    withTools: true,
+    toolCount: 8,
+  };
+
+  it("requests a runtime mode change without rendering an optimistic duplicate message", async () => {
+    let requestedMode: string | null = null;
+    const { stdin, lastFrame } = render(
+      <App
+        session={session}
+        history={[]}
+        callbacks={callbacks({ onSetMode: (mode) => { requestedMode = mode; } })}
+        register={() => undefined}
+      />,
+    );
+
+    stdin.write("\u001B[Z");
+    await tick();
+
+    expect(requestedMode).toBe("plan");
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("plan mode on — read-only");
+    expect(frame).toContain("default");
+  });
+
+  it("does not request a mode change while a turn is active", async () => {
+    let requestedMode: string | null = null;
+    const registered: { dispatch?: (action: Action) => void } = {};
+    const { stdin } = render(
+      <App
+        session={session}
+        history={[]}
+        callbacks={callbacks({ onSetMode: (mode) => { requestedMode = mode; } })}
+        register={(d) => {
+          registered.dispatch = d;
+        }}
+      />,
+    );
+
+    if (!registered.dispatch) throw new Error("App did not register dispatch");
+    registered.dispatch({ type: "USER_SENT", text: "work" });
+    await tick();
+    stdin.write("\u001B[Z");
+    await tick();
+
+    expect(requestedMode).toBeNull();
+  });
+});
+
 describe("PolicyDialog", () => {
   it("renders the pending policy request with allow/deny hints", () => {
     const { lastFrame } = render(
@@ -524,3 +792,17 @@ describe("PolicyDialog", () => {
     expect(frame).toContain("+new");
   });
 });
+
+function callbacks(overrides: Partial<AppCallbacks> = {}): AppCallbacks {
+  return {
+    onUserMessage: () => undefined,
+    onCancelTurn: () => undefined,
+    onPolicyResolve: () => undefined,
+    onPlanResolve: () => undefined,
+    ...overrides,
+  };
+}
+
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 20));
+}

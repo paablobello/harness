@@ -16,7 +16,7 @@ import { createBuiltinSensors } from "../sensors/builtin.js";
 import type { Sensor } from "../sensors/types.js";
 import { createBuiltinRegistry } from "../tools/builtin.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { ModelAdapter, PermissionMode } from "../types.js";
+import type { AskPlan, ModelAdapter, PermissionMode } from "../types.js";
 
 export type ProviderOpts = {
   model?: string;
@@ -132,6 +132,26 @@ export function terminalAsk(rl: readline.Interface): AskPrompt {
     console.log(pc.magenta(`\n? ${tool}${reasonLine}`) + (summary ? pc.dim(`\n  ${summary}`) : ""));
     const answer = (await rl.question(pc.magenta("  allow? [y/N] "))).trim().toLowerCase();
     return answer === "y" || answer === "yes";
+  };
+}
+
+/** Ask the user via stdin whether to approve an `exit_plan_mode` proposal. */
+export function terminalAskPlan(rl: readline.Interface): AskPlan {
+  return async ({ plan, allowedTools }) => {
+    console.log(pc.magenta("\n? exit_plan_mode"));
+    console.log(pc.dim("  Review the proposed plan below."));
+    console.log("");
+    console.log(plan);
+    if (allowedTools && allowedTools.length > 0) {
+      console.log(pc.dim(`\n  requested allowed tools: ${allowedTools.join(", ")}`));
+    }
+    const answer = (await rl.question(pc.magenta("\n  approve plan? [y/N] ")))
+      .trim()
+      .toLowerCase();
+    if (answer === "y" || answer === "yes") return { approved: true };
+
+    const feedback = (await rl.question(pc.magenta("  feedback for revision (optional): "))).trim();
+    return { approved: false, feedback: feedback || "Plan rejected." };
   };
 }
 

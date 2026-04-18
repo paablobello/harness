@@ -10,7 +10,7 @@ import type { PolicyEngine } from "../../policy/engine.js";
 import type { HookDispatcher } from "../../hooks/dispatcher.js";
 import type { Sensor } from "../../sensors/types.js";
 import type { ToolRegistry } from "../../tools/registry.js";
-import type { ModelAdapter, PermissionMode } from "../../types.js";
+import type { AskPlan, ModelAdapter, PermissionMode, PlanDecision } from "../../types.js";
 
 import { App, type AppCallbacks } from "./App.js";
 import { loadHistory } from "./history.js";
@@ -112,6 +112,20 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
       dispatchRef.current?.({ type: "POLICY_ASK", request: payload });
     });
 
+  let pendingPlanResolve: ((decision: PlanDecision) => void) | null = null;
+  const askPlan: AskPlan = (req) =>
+    new Promise<PlanDecision>((resolve) => {
+      pendingPlanResolve = resolve;
+      dispatchRef.current?.({
+        type: "PLAN_ASK",
+        request: {
+          id: crypto.randomUUID(),
+          plan: req.plan,
+          ...(req.allowedTools ? { allowedTools: req.allowedTools } : {}),
+        },
+      });
+    });
+
   const policy = opts.policyFactory ? opts.policyFactory(ask) : undefined;
 
   const controls = new ControlChannel();
@@ -126,6 +140,19 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
       pendingPolicyResolve = null;
       r?.(allow);
     },
+    onPlanResolve: (decision) => {
+      const r = pendingPlanResolve;
+      pendingPlanResolve = null;
+      if (decision.approved) {
+        r?.(
+          decision.editedPlan !== undefined
+            ? { approved: true, editedPlan: decision.editedPlan }
+            : { approved: true },
+        );
+      } else {
+        r?.({ approved: false, feedback: decision.feedback ?? "" });
+      }
+    },
     onCompact: (instructions) => {
       controls.push(
         instructions !== undefined ? { type: "compact", instructions } : { type: "compact" },
@@ -133,6 +160,9 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
     },
     onClear: () => {
       controls.push({ type: "clear" });
+    },
+    onSetMode: (mode) => {
+      controls.push({ type: "set_mode", mode });
     },
     ...(policy
       ? {
@@ -184,7 +214,9 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
       ...(opts.harnessConfig?.contextManagement
         ? { contextManagement: opts.harnessConfig.contextManagement }
         : {}),
+      askPlan,
       controls,
+      continueOnModelError: true,
       input: {
         next: nextUserInput,
       },
@@ -215,6 +247,12 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
           outputTokens: u.outputTokens,
           ...(u.costUsd !== undefined ? { costUsd: u.costUsd } : {}),
         }),
+      onModelError: (error) =>
+        dispatchRef.current?.({
+          type: "INFO",
+          level: "error",
+          text: `Model error: ${error}`,
+        }),
       onCompactStart: (info) => dispatchRef.current?.({ type: "COMPACT_START", reason: info.reason }),
       onCompactEnd: (info) =>
         dispatchRef.current?.({
@@ -232,6 +270,19 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
           type: "HISTORY_CLEARED",
           messagesDropped: info.messagesDropped,
         }),
+      onPermissionModeChanged: (info) => {
+        dispatchRef.current?.({ type: "SET_PERMISSION_MODE", mode: info.to });
+        dispatchRef.current?.({
+          type: "INFO",
+          level: "info",
+          text:
+            info.to === "plan"
+              ? `⏸ plan mode on (${info.source})`
+              : info.from === "plan"
+                ? `plan mode off — now "${info.to}"`
+                : `permission mode: ${info.to}`,
+        });
+      },
     });
     return summary;
   } finally {

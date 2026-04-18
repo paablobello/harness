@@ -18,6 +18,7 @@ import {
   permissionMode,
   resolveProviderOpts,
   terminalAsk,
+  terminalAskPlan,
 } from "./shared.js";
 import {
   printRunSummary,
@@ -113,6 +114,7 @@ export function runCommand(): Command {
               ? { maxSubagentDepth: config.maxSubagentDepth }
               : {}),
             ...(config.contextManagement ? { contextManagement: config.contextManagement } : {}),
+            askPlan: terminalAskPlan(rl),
             input: {
               async next() {
                 if (delivered) return null;

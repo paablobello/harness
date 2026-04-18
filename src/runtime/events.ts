@@ -3,6 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { finished } from "node:stream/promises";
 
+import type { PermissionMode } from "../types.js";
+
 /**
  * Every HarnessEvent is one line of JSONL in `.harness/runs/<run-id>/events.jsonl`.
  * Field naming mirrors Claude Code's hook payloads (snake_case + `event` key)
@@ -102,8 +104,15 @@ export type HarnessEvent = BaseFields &
         freed_messages: number;
         snapshot_path: string;
         duration_ms: number;
+        error?: string;
       }
     | { event: "HistoryCleared"; messages_dropped: number }
+    | {
+        event: "PermissionModeChanged";
+        from: PermissionMode;
+        to: PermissionMode;
+        source: "user" | "tool" | "system";
+      }
     | { event: "SessionEnd"; end_reason: SessionEndReason }
   );
 

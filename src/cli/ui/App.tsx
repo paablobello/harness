@@ -15,6 +15,7 @@ import { Header } from "./components/Header.js";
 import { InputPrompt } from "./components/InputPrompt.js";
 import { MessageList } from "./components/MessageList.js";
 import { Overlay } from "./components/Overlay.js";
+import { PlanApprovalDialog } from "./components/PlanApprovalDialog.js";
 import { PolicyDialog } from "./components/PolicyDialog.js";
 import { StatusBar } from "./components/StatusBar.js";
 import type { Action, SessionMeta, UiState } from "./state.js";
@@ -29,6 +30,12 @@ export type AppCallbacks = {
   readonly onCancelTurn: () => void;
   /** Resolve a pending policy question. */
   readonly onPolicyResolve: (allow: boolean) => void;
+  /** Resolve a pending plan-approval question. */
+  readonly onPlanResolve: (decision: {
+    approved: boolean;
+    feedback?: string;
+    editedPlan?: string;
+  }) => void;
   /**
    * Optional — when present, the policy dialog exposes "always allow for
    * session" and calls this with the tool name so the host can install a
@@ -39,6 +46,11 @@ export type AppCallbacks = {
   readonly onCompact?: (instructions?: string) => void;
   /** Push a /clear request into the runtime ControlChannel. */
   readonly onClear?: () => void;
+  /**
+   * Push a permission-mode change into the runtime ControlChannel. Called by
+   * Shift+Tab to toggle plan mode, and by `/mode` slash commands.
+   */
+  readonly onSetMode?: (mode: "default" | "acceptEdits" | "bypassPermissions" | "plan") => void;
 };
 
 export type AppProps = {
@@ -92,21 +104,29 @@ export function App(props: AppProps): ReactNode {
         dispatch({ type: "CLOSE_OVERLAY" });
       }
     },
-    { isActive: state.overlay !== null && state.pendingPolicy === null },
+    {
+      isActive:
+        state.overlay !== null && state.pendingPolicy === null && state.pendingPlan === null,
+    },
   );
 
-  // Ctrl+O toggles expand on the focused tool; Shift+Tab cycles focus.
+  // Ctrl+O toggles expand on the focused tool; Ctrl+] cycles focused tool;
+  // Shift+Tab requests a plan-mode toggle (default ↔ plan).
   useInput(
     (_input, key) => {
       if (key.ctrl && _input === "o") {
         if (state.focusedToolId) dispatch({ type: "TOGGLE_EXPAND", id: state.focusedToolId });
-      } else if (key.shift && key.tab) {
+      } else if (key.ctrl && _input === "]") {
         dispatch({ type: "FOCUS_TOOL", direction: "next" });
+      } else if (key.shift && key.tab) {
+        if (state.isTurnActive) return;
+        const next = state.permissionMode === "plan" ? "default" : "plan";
+        props.callbacks.onSetMode?.(next);
       } else if (key.tab && !key.shift) {
         // No-op: Tab is reserved for slash completion inside InputPrompt.
       }
     },
-    { isActive: state.pendingPolicy === null },
+    { isActive: state.pendingPolicy === null && state.pendingPlan === null },
   );
 
   const handleQuit = (): void => {
@@ -129,7 +149,10 @@ export function App(props: AppProps): ReactNode {
         handleQuit();
       }
     },
-    { isActive: state.isTurnActive && state.pendingPolicy === null },
+    {
+      isActive:
+        state.isTurnActive && state.pendingPolicy === null && state.pendingPlan === null,
+    },
   );
 
   return (
@@ -153,6 +176,15 @@ export function App(props: AppProps): ReactNode {
             {...(props.callbacks.onAlwaysAllow
               ? { onAlwaysAllow: props.callbacks.onAlwaysAllow }
               : {})}
+          />
+        )}
+        {state.pendingPlan && !state.pendingPolicy && (
+          <PlanApprovalDialog
+            request={state.pendingPlan}
+            onResolve={(decision) => {
+              dispatch({ type: "PLAN_RESOLVE" });
+              props.callbacks.onPlanResolve(decision);
+            }}
           />
         )}
         {!state.shouldExit && state.session.mode === "chat" && (

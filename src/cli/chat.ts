@@ -19,6 +19,7 @@ import {
   permissionMode,
   resolveProviderOpts,
   terminalAsk,
+  terminalAskPlan,
 } from "./shared.js";
 import { runInkApp } from "./ui/bridge.js";
 import { isExitInput, isLikelyHarnessInvocation } from "./ui/commands.js";
@@ -199,6 +200,8 @@ async function runPlainChat(args: PlainChatArgs): ReturnType<typeof runSession> 
         ? { maxSubagentDepth: config.maxSubagentDepth }
         : {}),
       ...(config.contextManagement ? { contextManagement: config.contextManagement } : {}),
+      askPlan: terminalAskPlan(rl),
+      continueOnModelError: true,
       input: {
         async next() {
           return readUserInput(rl, {
@@ -233,6 +236,9 @@ async function runPlainChat(args: PlainChatArgs): ReturnType<typeof runSession> 
       },
       onSensorRun: (res) => {
         printSensorResult(res);
+      },
+      onModelError: (error) => {
+        process.stdout.write(pc.red(`\nmodel error: ${error}\n`));
       },
     });
   } finally {

@@ -11,6 +11,10 @@ export const defaultPolicy: PolicyRule[] = [
   { match: { tool: "read_file" }, decision: "allow" },
   { match: { tool: "list_files" }, decision: "allow" },
   { match: { tool: "grep_files" }, decision: "allow" },
+  // Plan-mode exit: the "approval" itself is the UI dialog spawned inside the
+  // tool, so we allow the tool call unconditionally — denying here would make
+  // the model unable to surface the plan at all.
+  { match: { tool: "exit_plan_mode" }, decision: "allow" },
 
   { match: { tool: "edit_file" }, decision: "ask" },
   { match: { tool: "apply_patch" }, decision: "ask" },

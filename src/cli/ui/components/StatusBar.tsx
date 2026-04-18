@@ -8,14 +8,15 @@ import { useTheme } from "../theme.js";
 
 export function StatusBar({ state }: { state: UiState }): ReactNode {
   const theme = useTheme();
-  const { session, stats } = state;
+  const { session, stats, permissionMode } = state;
   const modelPriced = hasPricing(session.adapter.model);
   const cost = modelPriced ? `$${stats.costUsd.toFixed(4)}` : "cost n/a";
   const tokens = formatTokens(stats.tokensIn, stats.tokensOut);
   const ctx = classifyContext(state.usage.lastInputTokens, session.adapter.model);
+  const inPlan = permissionMode === "plan";
   const parts: ReactNode[] = [
-    <Text key="mode" color={theme.textMuted}>
-      {session.permissionMode}
+    <Text key="mode" color={inPlan ? theme.warning : theme.textMuted} bold={inPlan}>
+      {inPlan ? "⏸ plan" : permissionMode}
     </Text>,
     sep(theme.textMuted, 0),
     <Text key="model" color={theme.textMuted}>

@@ -1,14 +1,16 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type readline from "node:readline/promises";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildPolicy,
   buildToolSurface,
   composeSystemPrompt,
   resolveProviderOpts,
+  terminalAskPlan,
 } from "../../src/cli/shared.js";
 import { createBuiltinRegistry } from "../../src/tools/builtin.js";
 
@@ -92,9 +94,44 @@ describe("CLI shared builders", () => {
       model: "claude-sonnet-4-5",
     });
   });
+
+  it("terminalAskPlan returns approval when the user accepts", async () => {
+    const rl = fakeReadline(["yes"]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await expect(terminalAskPlan(rl)({ plan: "# Plan\n\nDo the thing." })).resolves.toEqual({
+        approved: true,
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("terminalAskPlan returns rejection feedback when the user declines", async () => {
+    const rl = fakeReadline(["n", "add tests"]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await expect(terminalAskPlan(rl)({ plan: "# Plan\n\nDo the thing." })).resolves.toEqual({
+        approved: false,
+        feedback: "add tests",
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
 
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
+}
+
+function fakeReadline(answers: string[]): readline.Interface {
+  return {
+    async question() {
+      return answers.shift() ?? "";
+    },
+  } as unknown as readline.Interface;
 }

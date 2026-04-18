@@ -76,6 +76,7 @@ describe("FileEventSink", () => {
       summary_tokens: 800,
       snapshot_path: "/tmp/snap.json",
       duration_ms: 450,
+      error: "boom",
     });
     sink.write({ ...common, event: "HistoryCleared", messages_dropped: 4 });
     await sink.close();
@@ -91,6 +92,7 @@ describe("FileEventSink", () => {
     expect(lines[1].reason).toBe("auto");
     expect(lines[1].threshold).toBe(180_000);
     expect(lines[2].freed_messages).toBe(12);
+    expect(lines[2].error).toBe("boom");
     expect(lines[3].messages_dropped).toBe(4);
   });
 });

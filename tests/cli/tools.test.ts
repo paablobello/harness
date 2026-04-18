@@ -39,7 +39,7 @@ describe("tools command", () => {
     const output = logs.join("\n");
     expect(output).toContain("harness.config.mjs");
     expect(output).toContain("read_file");
-    expect(output).toContain("7 tools registered");
+    expect(output).toContain("8 tools registered");
   });
 
   it("fails clearly when config shape is invalid", async () => {

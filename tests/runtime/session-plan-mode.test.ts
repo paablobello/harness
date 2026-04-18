@@ -1,0 +1,293 @@
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import { defaultPolicy } from "../../src/policy/defaults.js";
+import { PolicyEngine } from "../../src/policy/engine.js";
+import { ControlChannel } from "../../src/runtime/control.js";
+import { MemoryEventSink } from "../../src/runtime/events.js";
+import { runSession } from "../../src/runtime/session.js";
+import { createBuiltinRegistry } from "../../src/tools/builtin.js";
+import type {
+  AskPlan,
+  ConversationMessage,
+  ModelAdapter,
+  ModelEvent,
+  ModelTurnInput,
+  PlanDecision,
+} from "../../src/types.js";
+import { queuedInput } from "../fixtures/fake-adapter.js";
+
+/**
+ * Adapter that records every `turnInput` it was called with. Tests use the
+ * snapshot of `messages` to assert the session injected the plan-mode
+ * `<system-reminder>` on the right turn.
+ */
+function createRecordingAdapter(script: ModelEvent[][]): {
+  adapter: ModelAdapter;
+  seenMessages: ConversationMessage[][];
+} {
+  const seenMessages: ConversationMessage[][] = [];
+  let turn = 0;
+  const adapter: ModelAdapter = {
+    name: "fake",
+    model: "fake-model",
+    async *runTurn(input: ModelTurnInput): AsyncIterable<ModelEvent> {
+      seenMessages.push(input.messages.map((m) => ({ ...m })));
+      const events = script[turn] ?? [];
+      turn += 1;
+      for (const ev of events) yield ev;
+    },
+  };
+  return { adapter, seenMessages };
+}
+
+describe("plan mode — session integration", () => {
+  it("injects PLAN_ENTRY_REMINDER on the turn following a set_mode control", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-entry-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "default" });
+      const controls = new ControlChannel();
+      controls.push({ type: "set_mode", mode: "plan" });
+
+      const { adapter, seenMessages } = createRecordingAdapter([
+        [
+          { type: "text_delta", text: "ack" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        controls,
+        input: queuedInput(["hello"]),
+      });
+
+      const firstTurn = seenMessages[0] ?? [];
+      const reminder = firstTurn.find(
+        (m) => m.role === "user" && m.content.includes("Plan mode is now active"),
+      );
+      expect(reminder).toBeDefined();
+      expect(policy.getMode()).toBe("plan");
+
+      const modeChanged = sink.events.find((e) => e.event === "PermissionModeChanged");
+      expect(modeChanged).toMatchObject({ from: "default", to: "plan", source: "user" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("injects PLAN_ENTRY_REMINDER when the session starts in plan mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-start-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const { adapter, seenMessages } = createRecordingAdapter([
+        [
+          { type: "text_delta", text: "ack" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        input: queuedInput(["hello"]),
+      });
+
+      const firstTurn = seenMessages[0] ?? [];
+      const reminder = firstTurn.find(
+        (m) => m.role === "user" && m.content.includes("Plan mode is now active"),
+      );
+      expect(reminder).toBeDefined();
+      expect(sink.events.filter((e) => e.event === "PermissionModeChanged")).toHaveLength(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("denies write tools while in plan mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-deny-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const adapter = createRecordingAdapter([
+        [
+          {
+            type: "tool_call",
+            id: "c1",
+            name: "edit_file",
+            input: { path: "bad.txt", old_str: "", new_str: "nope" },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "fine" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]).adapter;
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        input: queuedInput(["try to write"]),
+      });
+
+      const policyDecisions = sink.events.filter((e) => e.event === "PolicyDecision");
+      const denial = policyDecisions.find(
+        (e) => "tool_name" in e && e.tool_name === "edit_file",
+      );
+      expect(denial).toMatchObject({ decision: "deny" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exit_plan_mode approval writes plan.md and restores previous mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-approve-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const planText =
+        "# Refactor auth\n\n1. Extract session token helper\n2. Update middleware\n3. Add tests";
+
+      const { adapter, seenMessages } = createRecordingAdapter([
+        [
+          {
+            type: "tool_call",
+            id: "c-exit",
+            name: "exit_plan_mode",
+            input: { plan: planText },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "implementing" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      const askPlan: AskPlan = async () => ({ approved: true });
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        askPlan,
+        input: queuedInput(["please plan"]),
+      });
+
+      expect(policy.getMode()).toBe("default");
+
+      const planDir = join(root, ".harness", "plans");
+      const files = await readdir(planDir);
+      expect(files).toHaveLength(1);
+      const firstFile = files[0];
+      expect(firstFile).toBeDefined();
+      const written = await readFile(join(planDir, firstFile as string), "utf8");
+      expect(written).toContain("Refactor auth");
+
+      const changed = sink.events.filter((e) => e.event === "PermissionModeChanged");
+      expect(changed).toHaveLength(1);
+      expect(changed[0]).toMatchObject({ from: "plan", to: "default", source: "tool" });
+
+      // Silence the unused-adapter-capture variable
+      expect(seenMessages.length).toBeGreaterThan(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exit_plan_mode rejection keeps plan mode active and surfaces feedback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-reject-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const { adapter, seenMessages } = createRecordingAdapter([
+        [
+          {
+            type: "tool_call",
+            id: "c-exit-1",
+            name: "exit_plan_mode",
+            input: { plan: "# Plan v1\n\nStep 1: do thing\nStep 2: other thing" },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "ok revising" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      const askPlan: AskPlan = async (): Promise<PlanDecision> => ({
+        approved: false,
+        feedback: "Missing step about DB migration.",
+      });
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        askPlan,
+        input: queuedInput(["plan please"]),
+      });
+
+      expect(policy.getMode()).toBe("plan");
+
+      const secondTurn = seenMessages[1] ?? [];
+      const toolResult = secondTurn.find(
+        (m) => m.role === "tool" && m.content.includes("Missing step about DB migration"),
+      );
+      expect(toolResult).toBeDefined();
+
+      const modeChanged = sink.events.filter((e) => e.event === "PermissionModeChanged");
+      expect(modeChanged).toHaveLength(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
