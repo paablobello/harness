@@ -16,6 +16,8 @@ export type SensorTrigger = "after_tool" | "after_turn" | "final";
 export type SensorContext = {
   workspaceRoot: string;
   cwd: string;
+  /** True when the session has executed a non-read tool since the relevant sensor checkpoint. */
+  workspaceChanged?: boolean;
   /** Tool just executed (if trigger === "after_tool"). */
   lastTool?: { name: string; input: unknown; ok: boolean; output: string };
   signal: AbortSignal;

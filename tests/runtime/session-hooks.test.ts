@@ -126,4 +126,97 @@ describe("runSession with hooks and sensors", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("skips after_turn sensors for pure conversation turns", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-sensor-skip-"));
+    try {
+      const sink = new MemoryEventSink();
+      let runs = 0;
+      const fakeSensor: Sensor = {
+        name: "fake-after-turn",
+        kind: "computational",
+        trigger: "after_turn",
+        async run() {
+          runs += 1;
+          return { ok: true, message: "should not run" };
+        },
+      };
+      const adapter = createScriptedAdapter([
+        [
+          { type: "text_delta", text: "hola" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        sensors: [fakeSensor],
+        input: queuedInput(["hola"]),
+      });
+
+      expect(runs).toBe(0);
+      expect(sink.events.some((e) => e.event === "SensorRun")).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs after_turn sensors after a mutating tool executes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-sensor-write-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: [], mode: "bypassPermissions" });
+      let runs = 0;
+      const fakeSensor: Sensor = {
+        name: "fake-after-turn",
+        kind: "computational",
+        trigger: "after_turn",
+        async run(ctx) {
+          runs += 1;
+          return { ok: true, message: ctx.workspaceChanged ? "changed" : "unchanged" };
+        },
+      };
+      const adapter = createScriptedAdapter([
+        [
+          {
+            type: "tool_call",
+            id: "c1",
+            name: "edit_file",
+            input: { path: "a.txt", old_str: "", new_str: "x" },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "done" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        sensors: [fakeSensor],
+        input: queuedInput(["edit"]),
+      });
+
+      expect(runs).toBe(1);
+      const sensorEvent = sink.events.find((e) => e.event === "SensorRun");
+      expect(sensorEvent && "message" in sensorEvent && sensorEvent.message).toBe("changed");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

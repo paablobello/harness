@@ -219,6 +219,8 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   let totalOutput = 0;
   let totalCost = 0;
   let turns = 0;
+  let workspaceChangedThisSession = false;
+  let workspaceChangedSinceAfterTurnSensors = false;
   let endReason: SessionEndReason = "eof";
   let lastAssistantMessage = "";
   let lastInputTokens = 0;
@@ -355,7 +357,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
 
   const runSensors = async (
     trigger: Sensor["trigger"],
-    extra?: { lastTool?: SensorContext["lastTool"] },
+    extra?: { lastTool?: SensorContext["lastTool"]; workspaceChanged?: boolean },
   ): Promise<void> => {
     for (const s of sensors) {
       if (s.trigger !== trigger) continue;
@@ -363,6 +365,9 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         workspaceRoot,
         cwd: cfg.cwd,
         signal,
+        ...(extra?.workspaceChanged !== undefined
+          ? { workspaceChanged: extra.workspaceChanged }
+          : {}),
         ...(extra?.lastTool ? { lastTool: extra.lastTool } : {}),
       };
       if (s.applicable) {
@@ -389,6 +394,17 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         );
       }
     }
+  };
+
+  const noteWorkspaceChange = (): void => {
+    workspaceChangedThisSession = true;
+    workspaceChangedSinceAfterTurnSensors = true;
+  };
+
+  const runAfterTurnSensors = async (): Promise<void> => {
+    if (!workspaceChangedSinceAfterTurnSensors) return;
+    await runSensors("after_turn", { workspaceChanged: true });
+    workspaceChangedSinceAfterTurnSensors = false;
   };
 
   const runCompaction = async (
@@ -739,7 +755,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         if (stopReason === "error") {
           cfg.onModelError?.(errorMsg ?? "model call failed");
           if (cfg.continueOnModelError) {
-            await runSensors("after_turn");
+            await runAfterTurnSensors();
             break modelLoop;
           }
           endReason = "error";
@@ -747,7 +763,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         }
 
         if (stopReason !== "tool_use" || toolCalls.length === 0) {
-          await runSensors("after_turn");
+          await runAfterTurnSensors();
           break modelLoop;
         }
 
@@ -914,6 +930,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
 
           const started = Date.now();
           try {
+            if (tool.risk !== "read") noteWorkspaceChange();
             const result = await tool.run(parsed.data, {
               workspaceRoot,
               cwd: cfg.cwd,
@@ -1002,7 +1019,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
       }
     }
   } finally {
-    await runSensors("final").catch(() => {
+    await runSensors("final", { workspaceChanged: workspaceChangedThisSession }).catch(() => {
       // swallow — don't fail SessionEnd on a broken sensor
     });
     cfg.sink.write({ ...base(), event: "SessionEnd", end_reason: endReason });

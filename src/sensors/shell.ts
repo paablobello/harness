@@ -23,6 +23,9 @@ export function shellSensor(opts: {
     kind: "computational",
     trigger: opts.trigger,
     async applicable(ctx) {
+      if ((opts.trigger === "after_turn" || opts.trigger === "final") && !ctx.workspaceChanged) {
+        return false;
+      }
       try {
         await access(join(ctx.workspaceRoot, opts.marker));
         return true;
