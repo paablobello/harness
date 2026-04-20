@@ -51,7 +51,7 @@ describe("parseCommand", () => {
     expect(p.pipelines[1]!.map((s) => s.executable)).toEqual(["echo", "cat"]);
   });
 
-  it("ignores redirection targets", () => {
+  it("captures redirection targets outside argv", () => {
     const p = parseCommand("echo hi > out.txt");
     expect(p.hasRedirection).toBe(true);
     expect(p.segments).toHaveLength(1);

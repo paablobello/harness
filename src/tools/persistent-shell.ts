@@ -1,5 +1,5 @@
 /**
- * Long-lived shell session that preserves cwd and env across `run_command`
+ * Long-lived shell session that preserves cwd across `run_command`
  * calls within a single Harness session. Inspired by opencode's
  * `GetPersistentShell` (Go) but with TS streaming semantics.
  *
@@ -26,6 +26,10 @@
  *
  * Platform: POSIX-only. Windows callers should skip the persistent shell
  * (the higher-level `run_command` falls back to a transient `execa`).
+ *
+ * Note: environment exports do not persist across calls because each command
+ * runs inside a protective subshell. We preserve cwd by recording `pwd` from
+ * that subshell's EXIT trap.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";

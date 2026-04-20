@@ -64,7 +64,8 @@ const input = z.object({
     .optional()
     .describe(
       `If the command is still running after this many ms, move it to a background ` +
-        `job and return its id (poll/kill with \`job_output\`). Default ${DEFAULT_AUTO_BACKGROUND_MS}.`,
+        `job and return its id (poll with \`job_output\`, terminate with \`job_kill\`). ` +
+        `Default ${DEFAULT_AUTO_BACKGROUND_MS}.`,
     ),
   run_in_background: z
     .boolean()
@@ -76,7 +77,7 @@ const input = z.object({
     .boolean()
     .optional()
     .describe(
-      "Reuse the per-session shell so cwd and exported env carry across calls. Default: true.",
+      "Reuse the per-session shell so cwd carries across calls. Default: true.",
     ),
 });
 
@@ -85,7 +86,7 @@ export const runCommandTool: ToolDefinition<z.infer<typeof input>> = {
   description:
     "Execute a shell command. Output is streamed live and capped at 30KB (tail-biased). " +
     "Long-running commands auto-background after 60s and return a job id; check progress " +
-    "or kill with `job_output`. Each command is parsed into segments so the policy can " +
+    "with `job_output` or terminate with `job_kill`. Each command is parsed into segments so the policy can " +
     "deny banlist commands hidden behind `&&`/`|`. Sensitive paths (.git, .env, ~/.ssh) " +
     "are blocked filesystem-aware. Stdin is always closed.",
   inputSchema: input,

@@ -153,17 +153,17 @@ export function parseCommand(command: string): ParsedCommand {
       currentArgv = [];
       return;
     }
-      const seg: Segment = {
-        executable,
-        argv: [...currentArgv],
-        redirectTargets: [...currentRedirectTargets],
-        rawText: [...currentArgv, ...currentRedirectTargets.map((t) => `> ${t}`)].join(" "),
-      };
-      segments.push(seg);
-      currentPipeline.push(seg);
-      currentArgv = [];
-      currentRedirectTargets = [];
+    const seg: Segment = {
+      executable,
+      argv: [...currentArgv],
+      redirectTargets: [...currentRedirectTargets],
+      rawText: [...currentArgv, ...currentRedirectTargets.map((t) => `> ${t}`)].join(" "),
     };
+    segments.push(seg);
+    currentPipeline.push(seg);
+    currentArgv = [];
+    currentRedirectTargets = [];
+  };
 
   const flushPipeline = (): void => {
     if (currentPipeline.length > 0) {

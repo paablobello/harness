@@ -17,6 +17,7 @@ const readTool: ToolDefinition = {
 };
 const editTool: ToolDefinition = { ...readTool, name: "edit_file", risk: "write" };
 const runTool: ToolDefinition = { ...readTool, name: "run_command", risk: "execute" };
+const jobKillTool: ToolDefinition = { ...readTool, name: "job_kill", risk: "execute" };
 
 describe("PolicyEngine (defaults)", () => {
   it("allows reads without asking", async () => {
@@ -33,6 +34,17 @@ describe("PolicyEngine (defaults)", () => {
     const decision = await engine.decide({
       tool: editTool,
       input: { path: "a.ts", old_str: "x", new_str: "y" },
+    });
+    expect(decision.decision).toBe("allow");
+    expect(ask).toHaveBeenCalledOnce();
+  });
+
+  it("asks before killing background jobs", async () => {
+    const ask = vi.fn(async () => true);
+    const engine = new PolicyEngine({ rules: defaultPolicy, ask });
+    const decision = await engine.decide({
+      tool: jobKillTool,
+      input: { id: "job-123" },
     });
     expect(decision.decision).toBe("allow");
     expect(ask).toHaveBeenCalledOnce();

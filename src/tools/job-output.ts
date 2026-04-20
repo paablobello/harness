@@ -22,7 +22,7 @@ const input = z.object({
 export const jobOutputTool: ToolDefinition<z.infer<typeof input>> = {
   name: "job_output",
   description:
-    "Inspect or terminate background commands previously started by `run_command`. " +
+    "Inspect background commands previously started by `run_command`. " +
     "Without `id`, returns a summary of every live job in the session. With `id`, " +
     "returns the job's accumulated stdout/stderr (capped at 256KB total). Use " +
     "`job_kill` to terminate a job.",
