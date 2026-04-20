@@ -1,4 +1,6 @@
+import { parseCommand } from "../tools/command-parser.js";
 import type { PermissionMode, PolicyDecision, PolicyRule, ToolDefinition } from "../types.js";
+import { evaluateRunCommand } from "./run-command-policy.js";
 
 export type AskPrompt = (req: {
   tool: string;
@@ -50,16 +52,22 @@ export class PolicyEngine {
    * Decide whether a tool invocation should proceed.
    *
    * Permission modes short-circuit matching:
-   *  - explicit deny     → always deny
+   *  - explicit deny     → always deny (catastrophic run_command included)
    *  - bypassPermissions → allow everything else
    *  - plan              → deny all write/execute ("planned only")
    *  - acceptEdits       → allow write, ask still applies to execute
-   *  - default           → rule matching
+   *  - default           → rule matching + run_command segment eval
    */
   async decide(req: { tool: ToolDefinition; input: unknown }): Promise<PolicyDecision> {
     const { tool, input } = req;
-    const match = this.firstMatch(tool.name, input);
 
+    // Run the per-segment evaluator first so catastrophic patterns
+    // (`rm -rf /`, fork bombs, `curl … | sh`) deny even when a runtime rule
+    // would have allowed run_command wholesale.
+    const segDecision = this.runCommandSegmentDecision(tool, input);
+    if (segDecision?.decision === "deny") return segDecision;
+
+    const match = this.firstMatch(tool.name, input);
     if (match?.decision === "deny") {
       return { decision: "deny", reason: match.reason ?? "denied by policy" };
     }
@@ -72,14 +80,27 @@ export class PolicyEngine {
       return { decision: "allow" };
     }
 
-    const base: PolicyDecision =
-      match?.decision === "allow"
-        ? { decision: "allow" }
-        : match?.decision === "ask"
-          ? { decision: "ask", ...(match.reason ? { reason: match.reason } : {}) }
-          : { decision: "ask" };
+    // Compose the base decision. Order of precedence:
+    //   1. Explicit allow rule wins over a segment "ask" — this lets the
+    //      "always allow for session" affordance and user-defined rules
+    //      bypass safe-prefix limits.
+    //   2. Segment "allow" only fires when no rule said anything stronger.
+    //   3. Otherwise fall back to the rule decision, then segment, then "ask".
+    let baseDecision: "allow" | "ask" = "ask";
+    let baseReason: string | undefined;
+    if (match?.decision === "allow") {
+      baseDecision = "allow";
+    } else if (segDecision?.decision === "allow") {
+      baseDecision = "allow";
+    } else if (segDecision?.decision === "ask") {
+      baseDecision = "ask";
+      baseReason = segDecision.reason;
+    } else if (match?.decision === "ask") {
+      baseDecision = "ask";
+      baseReason = match.reason;
+    }
 
-    if (base.decision !== "ask") return base;
+    if (baseDecision === "allow") return { decision: "allow" };
 
     const stickyKey = this.stickyKey(tool.name, input);
     if (this.stickyAllow.has(stickyKey)) return { decision: "allow" };
@@ -87,13 +108,24 @@ export class PolicyEngine {
     const approved = await this.ask({
       tool: tool.name,
       input,
-      ...(base.reason ? { reason: base.reason } : {}),
+      ...(baseReason ? { reason: baseReason } : {}),
     });
     if (approved) {
       this.stickyAllow.add(stickyKey);
       return { decision: "allow" };
     }
     return { decision: "deny", reason: "user declined" };
+  }
+
+  private runCommandSegmentDecision(
+    tool: ToolDefinition,
+    input: unknown,
+  ): PolicyDecision | null {
+    if (tool.name !== "run_command") return null;
+    if (!input || typeof input !== "object") return null;
+    const cmd = (input as { command?: unknown }).command;
+    if (typeof cmd !== "string" || cmd.length === 0) return null;
+    return evaluateRunCommand(parseCommand(cmd));
   }
 
   private firstMatch(toolName: string, input: unknown): PolicyRule | undefined {

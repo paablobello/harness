@@ -45,6 +45,13 @@ export type HarnessEvent = BaseFields &
         duration_ms: number;
       }
     | {
+        event: "ToolOutputDelta";
+        tool_use_id: string;
+        tool_name: string;
+        stream: "stdout" | "stderr";
+        text: string;
+      }
+    | {
         event: "HookBlocked";
         hook_event_name: string;
         reason: string;

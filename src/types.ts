@@ -87,6 +87,13 @@ export type ToolContext = {
   setPermissionMode?: (mode: PermissionMode, source?: "user" | "tool" | "system") => void;
   /** Injected by the runtime. The permission mode active before entering plan mode. */
   previousPermissionMode?: PermissionMode;
+  /**
+   * Injected by the runtime. Streaming-output channel used by `run_command`
+   * (and any other long-running tool) to push partial stdout/stderr to the
+   * UI as the command runs, instead of dumping everything at the end. Each
+   * chunk is also persisted as a `ToolOutputDelta` event in the JSONL log.
+   */
+  emitOutput?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
 };
 
 export type PlanDecision =

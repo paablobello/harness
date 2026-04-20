@@ -6,7 +6,7 @@ Provider-agnostic coding-agent harness in TypeScript (CLI + SDK).
 
 - `src/runtime/` — session/turn loop, events, cost accounting
 - `src/adapters/` — model provider adapters (Anthropic, OpenAI)
-- `src/tools/` — built-in tools (read/list/grep/edit/apply-patch/run-command/subagent/exit-plan-mode)
+- `src/tools/` — built-in tools (read/list/grep/edit/apply-patch/run-command/job-output/subagent/exit-plan-mode); see `command-parser.ts`, `persistent-shell.ts`
 - `src/policy/` — policy engine + defaults
 - `src/hooks/` — hook dispatcher (Claude Code-style events)
 - `src/sensors/` — computational + inferential sensors
@@ -104,6 +104,127 @@ Workflow:
 write is gated by the user-facing approval dialog, not by the policy engine,
 so in a non-interactive runtime the tool fails fast instead of writing without
 consent.
+
+## Command execution
+
+`run_command` is the only tool that can spawn arbitrary processes. It is the
+single largest blast radius in the harness, so the implementation is layered
+defence-in-depth across **policy → protected paths → execution mode → output
+streaming → background lifecycle**.
+
+### 1. Segment-based policy
+
+The legacy "single regex on the raw command" approach is trivially bypassed
+(`echo hi && rm -rf ~`, `cat foo | bash`). We tokenise the command with
+`shell-quote` (`src/tools/command-parser.ts`) and split it on every shell
+control op (`;`, `&&`, `||`, `|`, `&`). The result is a list of `Segment`s
+plus pipeline groupings, with flags for `hasPipe`, `hasRedirection`,
+`hasSubshell`, and `parseError`.
+
+`src/policy/run-command-policy.ts` then walks the parsed command in a fixed
+order:
+
+1. **Catastrophic patterns → hard `deny`** (`rm -rf /`, `mkfs.*`, `dd of=/dev/sda`,
+   classic fork bomb, `chmod 777 /`). Cannot be auto-approved.
+2. **Remote-fetched script piped to a shell → hard `deny`** (`curl … | sh`,
+   even when separated by `tee`/`xargs`).
+3. **Subshell `$(…)` or backticks → `ask`.** We can't statically reason
+   inside, so we degrade to user confirmation.
+4. **Sensitive executables → `ask`** (`sudo`, `ssh`, `rsync`, `apt`, `brew`,
+   `systemctl`, `iptables`, browsers, …). Note: routed through `ask`, **not**
+   `deny`. The previous default was deny-by-banlist which led to silent
+   failures the model couldn't recover from. The escalation flow is now
+   "ask the user" rather than "fail closed".
+5. **All segments on the safe-prefix allowlist → auto-`allow`** (`git status`,
+   `ls`, `pwd`, `cat`, `pnpm test`, `node -v`, …). Prefix-based so
+   `git status -s` is just as safe as `git status`, but `git push` is not on
+   the list and falls through.
+6. Otherwise → `ask`.
+
+`PolicyEngine.decide` calls this evaluator before applying its general rule
+matcher (`src/policy/engine.ts`). Catastrophic denies short-circuit even when
+a rule (or session-wide "always allow") would have allowed the tool. Explicit
+allow rules win over a segment "ask" so the TUI's `a` ("always allow for
+session") affordance still works.
+
+### 2. Protected paths (filesystem-aware)
+
+`src/runtime/protected-paths.ts` is independent from the policy engine and
+inspects every argv token of every parsed segment. Each path is `~`/`$HOME`
+expanded, normalised, then matched as a path **prefix** (so
+`cat ~/.ssh/id_rsa`, `cat /Users/x/.ssh/id_rsa`, and `cat ./.ssh/id_rsa`
+when cwd is `$HOME` all hit). Coverage:
+
+- Absolute: `/etc/sudoers`, `/etc/shadow`, `/etc/passwd`, `/etc/ssh`,
+  `/etc/ssl/private`, `/var/root`, `/root`.
+- Home-relative: `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.gcloud`, `~/.kube`,
+  `~/.docker/config.json`, `~/.npmrc`, `~/.pypirc`, `~/.netrc`,
+  `~/.config/gh`.
+- Workspace: `.git`, `.harness/runs`.
+- Basename glob: `.env*`, `*.pem`, `*.key`, `id_rsa`/`id_ed25519`/…
+
+A protected-path hit downgrades a would-be `allow` to `ask` with the matched
+token surfaced in the prompt reason.
+
+### 3. Execution modes
+
+Three execution backends, picked per call:
+
+- **`runWithPersistentShell` (default on POSIX).** Long-lived `$SHELL` per
+  session (`src/tools/persistent-shell.ts`). Each command runs inside a
+  subshell `( … )` so `exit N` can't kill the parent shell, with
+  `trap "pwd > …" EXIT` capturing the cwd no matter how the subshell
+  terminates. Result: `cd` survives across calls, but `export FOO=…` does
+  not (assignment happens in the subshell). We accept losing env-var
+  persistence to gain crash-resistance. Output is redirected to per-call
+  temp files which we tail at 50 ms for streaming. `killChildren()` uses
+  `pgrep -P` and SIGTERM → SIGKILL after a 200 ms grace.
+- **`runTransient` (Windows or `use_persistent_shell: false`).** Plain
+  `execa` invocation, no cwd persistence. The fallback for platforms where
+  the persistent shell isn't reliable.
+- **`runAsBackground` (`run_in_background: true` or auto-trigger).**
+  Spawned via `execa` and registered in `src/runtime/background-jobs.ts`.
+  Returns a `job_id` immediately. Stdout/stderr are buffered in-memory
+  (capped at 256 KB each, oldest dropped). The model inspects/kills jobs
+  through the `job_output` tool. The session's cleanup (`SessionEnd`) calls
+  `releaseSessionJobs` which SIGTERM-then-SIGKILLs every live job.
+
+### 4. Timeouts and auto-backgrounding
+
+`run_command` accepts both `timeout_ms` (absolute wall-clock cap) and
+`inactivity_ms` (resets on every output chunk). When a foreground command
+crosses `auto_background_after_ms` (default 60s), it is **promoted to a
+background job** transparently — the tool returns the job id and the model
+can poll progress with `job_output`. Conversely, jobs explicitly started in
+the background go through a 1s **fast-failure window**: if the process exits
+within that window we synchronously return its result instead of a job id,
+so commands that die immediately surface as normal failures.
+
+### 5. Streaming output (UI ↔ runtime)
+
+Tools receive an optional `ctx.emitOutput(chunk)` callback (`src/types.ts`).
+The session forwards each chunk to the runtime as a `ToolOutputDelta` event
+(`src/runtime/events.ts`); the Ink bridge dispatches `TOOL_OUTPUT_DELTA`
+into the UI reducer (`src/cli/ui/state.ts`); `ToolBlock.tsx` swaps the
+"final output" view for a live `StreamingOutput` component while the tool
+is `running`. The UI buffer is also capped so a chatty server doesn't grow
+state without bound.
+
+### Platform notes
+
+- **macOS / Linux.** Full feature set: persistent shell, streaming, auto-
+  background, `pgrep`-based child kill.
+- **Windows.** Best-effort: the persistent shell is disabled (we fall back
+  to transient `execa`); cwd does not persist across calls; child-kill
+  relies on `execa`'s built-in tree kill since `pgrep` isn't available.
+
+### Out of scope (future PR)
+
+OS-level sandboxing (`sandbox-exec` on macOS, `bubblewrap`/`firejail` on
+Linux, optional Docker container wrapping) is **explicitly deferred**. The
+soft layers above already deny the obviously-bad shapes and ask for
+everything else; sandboxing will plug in as an optional `runner: "sandbox"
+| "container"` per-tool setting without changing the policy contract.
 
 ## Testing
 

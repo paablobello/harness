@@ -233,6 +233,13 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
           output: res.output,
           ...(res.durationMs !== undefined ? { durationMs: res.durationMs } : {}),
         }),
+      onToolOutputDelta: (delta) =>
+        dispatchRef.current?.({
+          type: "TOOL_OUTPUT_DELTA",
+          id: delta.id,
+          stream: delta.stream,
+          text: delta.text,
+        }),
       onSensorRun: (res) =>
         dispatchRef.current?.({
           type: "SENSOR_RUN",

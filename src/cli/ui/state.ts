@@ -25,6 +25,12 @@ export type ToolMsg = {
   readonly durationMs?: number;
   readonly expanded: boolean;
   readonly turn: number;
+  /**
+   * Live stdout/stderr buffer accumulated from `ToolOutputDelta` events
+   * while the tool is still running. Wiped on `TOOL_RESULT`. Capped to the
+   * last ~8KB so chatty servers don't blow up the terminal.
+   */
+  readonly streamingOutput?: string;
 };
 
 export type SensorMsg = {
@@ -165,6 +171,7 @@ export type Action =
       call: ToolCall;
     }
   | { type: "TOOL_RESULT"; id: string; ok: boolean; output: string; durationMs?: number }
+  | { type: "TOOL_OUTPUT_DELTA"; id: string; stream: "stdout" | "stderr"; text: string }
   | { type: "SENSOR_RUN"; name: string; ok: boolean; message: string }
   | { type: "USAGE"; inputTokens: number; outputTokens: number; costUsd?: number }
   | { type: "TURN_START" }
@@ -321,17 +328,33 @@ export function reducer(state: UiState, action: Action): UiState {
         messages: [...state.messages, msg],
       };
     }
+    case "TOOL_OUTPUT_DELTA": {
+      const messages = state.messages.map((m) => {
+        if (m.kind === "tool" && m.id === action.id) {
+          const prev = m.streamingOutput ?? "";
+          // Cap rolling buffer at 8KB; the final ToolResult will carry the
+          // canonical (truncated) output anyway.
+          const merged = (prev + action.text).slice(-8192);
+          return { ...m, streamingOutput: merged };
+        }
+        return m;
+      });
+      return { ...state, messages };
+    }
     case "TOOL_RESULT": {
       let toolName: string | null = null;
       const messages = state.messages.map((m) => {
         if (m.kind === "tool" && m.id === action.id) {
           toolName = m.name;
-          return {
+          const next: ToolMsg = {
             ...m,
             status: action.ok ? ("ok" as const) : ("fail" as const),
             output: action.output,
             ...(action.durationMs !== undefined ? { durationMs: action.durationMs } : {}),
           };
+          // Drop the streaming buffer — the final output supersedes it.
+          delete (next as { streamingOutput?: string }).streamingOutput;
+          return next;
         }
         return m;
       });

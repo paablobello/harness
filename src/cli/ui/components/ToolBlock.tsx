@@ -52,6 +52,9 @@ export function ToolBlock({ msg, focused, details, connector = false }: Props): 
               <Text color={theme.textMuted}>{line || " "}</Text>
             </Box>
           ))}
+      {!hasOutput && msg.status === "running" && msg.streamingOutput && (
+        <StreamingOutput text={msg.streamingOutput} expanded={expanded} />
+      )}
       {hasOutput && (
         <ToolOutput
           msg={msg}
@@ -142,6 +145,36 @@ function ToolOutput({
           </Text>
         </Box>
       )}
+    </>
+  );
+}
+
+function StreamingOutput({
+  text,
+  expanded,
+}: {
+  readonly text: string;
+  readonly expanded: boolean;
+}): ReactNode {
+  const theme = useTheme();
+  const lines = text.split("\n");
+  // Tail-bias the live view: most recent N lines (default 6 collapsed, all expanded).
+  const visible = expanded ? lines : lines.slice(-6);
+  const hidden = lines.length - visible.length;
+  return (
+    <>
+      {hidden > 0 && (
+        <Box>
+          <Text color={theme.accentDim}>{"│ "}</Text>
+          <Text color={theme.textDim}>… +{hidden} earlier line(s)</Text>
+        </Box>
+      )}
+      {visible.map((line, i) => (
+        <Box key={`s${i}`}>
+          <Text color={theme.accentDim}>{"│ "}</Text>
+          <Text color={theme.textMuted}>{line || " "}</Text>
+        </Box>
+      ))}
     </>
   );
 }

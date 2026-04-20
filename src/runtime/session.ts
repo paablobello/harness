@@ -16,12 +16,14 @@ import type {
   SpawnSubagentResult,
   ToolCall,
 } from "../types.js";
+import { releaseSessionJobs } from "./background-jobs.js";
 import { compactMessages } from "./compactor.js";
 import { classifyContext, DEFAULT_CONTEXT_THRESHOLDS } from "./context-window.js";
 import type { ControlChannel } from "./control.js";
 import { computeCost } from "./cost.js";
 import type { EventSink, HarnessEvent, SessionEndReason } from "./events.js";
 import { PLAN_ENTRY_REMINDER, PLAN_EXIT_REMINDER } from "./plan-mode-prompts.js";
+import { releasePersistentShell } from "../tools/persistent-shell.js";
 
 /**
  * An `UserInputStream` drives the turn loop. Returning `null` means the user
@@ -66,6 +68,17 @@ export type SessionConfig = {
     ok: boolean;
     output: string;
     durationMs?: number;
+  }) => void;
+  /**
+   * Live stdout/stderr deltas emitted by tools that opt into streaming
+   * (currently `run_command`). Mirrors the `ToolOutputDelta` JSONL event so
+   * the UI can render output as it arrives.
+   */
+  onToolOutputDelta?: (delta: {
+    id: string;
+    name: string;
+    stream: "stdout" | "stderr";
+    text: string;
   }) => void;
   onSensorRun?: (res: { name: string; ok: boolean; message: string }) => void;
   onUsage?: (usage: { inputTokens: number; outputTokens: number; costUsd?: number }) => void;
@@ -943,6 +956,22 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
                 applyPermissionMode(mode, source);
               },
               previousPermissionMode,
+              emitOutput: (chunk) => {
+                cfg.sink.write({
+                  ...base(),
+                  event: "ToolOutputDelta",
+                  tool_use_id: call.id,
+                  tool_name: call.name,
+                  stream: chunk.stream,
+                  text: chunk.text,
+                });
+                cfg.onToolOutputDelta?.({
+                  id: call.id,
+                  name: call.name,
+                  stream: chunk.stream,
+                  text: chunk.text,
+                });
+              },
             });
             const duration = Date.now() - started;
             cfg.sink.write({
@@ -1022,6 +1051,15 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
     await runSensors("final", { workspaceChanged: workspaceChangedThisSession }).catch(() => {
       // swallow — don't fail SessionEnd on a broken sensor
     });
+    // Subagents share the parent's sessionId for the persistent shell? They
+    // get their own runtime sessionId, but the shell is keyed off ours, so
+    // we only tear it down for top-level sessions (closeSink === true).
+    if (closeSink) {
+      await Promise.all([
+        releasePersistentShell(sessionId).catch(() => undefined),
+        releaseSessionJobs(sessionId).catch(() => undefined),
+      ]);
+    }
     cfg.sink.write({ ...base(), event: "SessionEnd", end_reason: endReason });
     if (cfg.hooks) {
       await cfg.hooks

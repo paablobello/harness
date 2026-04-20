@@ -4,7 +4,10 @@ import type { PolicyRule } from "../types.js";
  * Sensible defaults roughly aligned with Claude Code's permission model:
  *   - reads flow freely
  *   - edits ask
- *   - known-safe commands ask; destructive patterns deny; everything else asks
+ *   - run_command is evaluated PER SEGMENT inside the engine via
+ *     `evaluateRunCommand` (`src/policy/run-command-policy.ts`), so we don't
+ *     list a flat regex here anymore — that approach was trivially bypassed
+ *     by `&&`, `;`, `|` and friends.
  *   - MCP tools ask
  */
 export const defaultPolicy: PolicyRule[] = [
@@ -19,23 +22,11 @@ export const defaultPolicy: PolicyRule[] = [
   { match: { tool: "edit_file" }, decision: "ask" },
   { match: { tool: "apply_patch" }, decision: "ask" },
 
-  {
-    match: {
-      tool: "run_command",
-      pattern: /(^|[\s;&|])(rm\s+-rf|sudo\b|:\(\)\s*\{|curl\b[^|]*\|\s*(sh|bash))/,
-    },
-    decision: "deny",
-    reason: "destructive or exfiltration pattern",
-  },
-  {
-    match: {
-      tool: "run_command",
-      pattern:
-        /^\s*(git\s+(status|diff|log|show)|ls\b|pwd\b|cat\b|node\b|npm\s+test|pnpm\s+(test|typecheck|lint)|vitest\b)/,
-    },
-    decision: "ask",
-  },
-  { match: { tool: "run_command" }, decision: "ask" },
+  // Background job inspection is read-only output retrieval.
+  { match: { tool: "job_output" }, decision: "allow" },
+
+  // Note: no `run_command` rules here. The engine special-cases that tool
+  // and runs `evaluateRunCommand` on the parsed segments.
 
   { match: { tool: "subagent" }, decision: "allow" },
   { match: { tool: /^mcp__/ }, decision: "ask" },
