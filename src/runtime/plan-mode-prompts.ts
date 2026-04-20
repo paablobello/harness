@@ -85,3 +85,14 @@ The user rejected the plan. Plan mode is still active. Read their feedback
 in the last tool result, revise your plan accordingly, and call
 \`exit_plan_mode\` again with the updated plan when ready.
 </system-reminder>`;
+
+export const PLAN_PLAINTEXT_REPROMPT = `<system-reminder>
+Plan mode is still active, but your previous response tried to finish in
+regular assistant text. That response was intercepted.
+
+Do not present an implementation plan, audit, recommendations, or final answer
+as normal assistant text while plan mode is active. If you have enough
+information, call \`exit_plan_mode\` now and put the full plan in its \`plan\`
+argument. If you still need context, use read-only tools. Only ask the user a
+plain-text clarifying question when the scope is genuinely ambiguous.
+</system-reminder>`;

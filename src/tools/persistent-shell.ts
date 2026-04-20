@@ -78,6 +78,10 @@ export class PersistentShell {
     return this.alive && this.shell !== null;
   }
 
+  isBusy(): boolean {
+    return this.inFlight;
+  }
+
   /**
    * (Re-)spawn the underlying shell. Idempotent: a no-op when already alive.
    * Called lazily on the first `run` and on respawn after a crash.
@@ -364,6 +368,13 @@ export function acquirePersistentShell(sessionId: string, cwd: string): Persiste
     shellsBySession.set(sessionId, s);
   }
   return s;
+}
+
+export function detachPersistentShell(sessionId: string, shell?: PersistentShell): void {
+  const current = shellsBySession.get(sessionId);
+  if (!current) return;
+  if (shell && current !== shell) return;
+  shellsBySession.delete(sessionId);
 }
 
 export async function releasePersistentShell(sessionId: string): Promise<void> {

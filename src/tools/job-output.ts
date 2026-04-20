@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getJob, killJob, listJobs } from "../runtime/background-jobs.js";
+import { getJob, listJobs } from "../runtime/background-jobs.js";
 import type { ToolDefinition } from "../types.js";
 
 const input = z.object({
@@ -17,10 +17,6 @@ const input = z.object({
     .max(1000)
     .optional()
     .describe("Limit the response to the last N lines of output (default: full buffer)."),
-  kill: z
-    .boolean()
-    .optional()
-    .describe("If true, send SIGTERM (then SIGKILL after 200ms) to the job."),
 });
 
 export const jobOutputTool: ToolDefinition<z.infer<typeof input>> = {
@@ -28,13 +24,9 @@ export const jobOutputTool: ToolDefinition<z.infer<typeof input>> = {
   description:
     "Inspect or terminate background commands previously started by `run_command`. " +
     "Without `id`, returns a summary of every live job in the session. With `id`, " +
-    "returns the job's accumulated stdout/stderr (capped at 256KB total). Pass " +
-    "`kill: true` to terminate.",
+    "returns the job's accumulated stdout/stderr (capped at 256KB total). Use " +
+    "`job_kill` to terminate a job.",
   inputSchema: input,
-  // Listing or reading job output is a read; killing is risk:execute, but the
-  // spawning `run_command` already went through policy and the user-facing
-  // job is theirs to manage. We mark it `read` so it doesn't pop a confirm
-  // dialog every poll; the policy default for `job_output` is `allow`.
   risk: "read",
   source: "builtin",
   async run(args, ctx) {
@@ -47,17 +39,6 @@ export const jobOutputTool: ToolDefinition<z.infer<typeof input>> = {
         return `- ${j.id}  ${status}  ${ageMs}ms  cwd=${j.cwd}  cmd=${truncate(j.command, 80)}`;
       });
       return { ok: true, output: lines.join("\n") };
-    }
-
-    if (args.kill) {
-      const killed = await killJob(ctx.sessionId, args.id);
-      if (!killed) return { ok: false, output: `No such job: ${args.id}` };
-      return {
-        ok: true,
-        output:
-          `Killed ${killed.id}.\n` +
-          `exit=${killed.exitCode ?? "null"} done=${killed.done} killed=${killed.killed}`,
-      };
     }
 
     const job = getJob(ctx.sessionId, args.id);

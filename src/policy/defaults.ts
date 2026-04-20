@@ -24,6 +24,7 @@ export const defaultPolicy: PolicyRule[] = [
 
   // Background job inspection is read-only output retrieval.
   { match: { tool: "job_output" }, decision: "allow" },
+  { match: { tool: "job_kill" }, decision: "ask" },
 
   // Note: no `run_command` rules here. The engine special-cases that tool
   // and runs `evaluateRunCommand` on the parsed segments.

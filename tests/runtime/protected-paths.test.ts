@@ -71,4 +71,16 @@ describe("touchesProtectedPath", () => {
     const hit = check("cat /etc/sudoers");
     expect(hit).not.toBeNull();
   });
+
+  it("flags protected redirection targets", () => {
+    const hit = check("echo TOKEN > .env");
+    expect(hit).not.toBeNull();
+    expect(hit!.token).toBe(".env");
+  });
+
+  it("flags stderr redirection targets", () => {
+    const hit = check("node app.js 2> .env.local");
+    expect(hit).not.toBeNull();
+    expect(hit!.token).toBe(".env.local");
+  });
 });

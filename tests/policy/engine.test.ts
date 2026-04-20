@@ -170,5 +170,20 @@ describe("PolicyEngine (defaults)", () => {
       expect(decision.decision).toBe("allow");
       expect(ask).toHaveBeenCalled();
     });
+
+    it("does not auto-allow executable wrappers like env/find/xargs", async () => {
+      const ask = vi.fn(async () => false);
+      const engine = new PolicyEngine({ rules: defaultPolicy, ask });
+
+      for (const command of [
+        "env bash -c 'echo unsafe'",
+        "find . -delete",
+        "printf '%s\\n' foo | xargs rm",
+      ]) {
+        const decision = await engine.decide({ tool: runTool, input: { command } });
+        expect(decision.decision).toBe("deny");
+      }
+      expect(ask).toHaveBeenCalledTimes(3);
+    });
   });
 });

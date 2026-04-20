@@ -89,11 +89,11 @@ const SHELLS: ReadonlySet<string> = new Set([
 const SAFE_ARGV_PREFIXES: readonly (readonly string[])[] = [
   // Filesystem / shell basics
   ["ls"], ["pwd"], ["echo"], ["cat"], ["wc"], ["head"], ["tail"],
-  ["sort"], ["uniq"], ["cut"], ["tr"], ["grep"], ["rg"], ["find"], ["fd"],
-  ["awk"], ["sed", "-n"], ["xargs", "-n"],
+  ["sort"], ["uniq"], ["cut"], ["tr"], ["grep"], ["rg"],
+  ["sed", "-n"],
   ["which"], ["type"], ["whereis"], ["file"],
   ["date"], ["whoami"], ["id"], ["uname"], ["uptime"], ["hostname"],
-  ["env"], ["printenv"],
+  ["printenv"],
   ["stat"], ["du"], ["df"],
   ["true"], ["false"],
   // Runtime version probes

@@ -56,6 +56,8 @@ describe("parseCommand", () => {
     expect(p.hasRedirection).toBe(true);
     expect(p.segments).toHaveLength(1);
     expect(p.segments[0]!.argv).toEqual(["echo", "hi"]);
+    expect(p.segments[0]!.redirectTargets).toEqual(["out.txt"]);
+    expect(p.redirectTargets).toEqual(["out.txt"]);
   });
 
   it("handles >>, 2>", () => {
@@ -63,6 +65,7 @@ describe("parseCommand", () => {
     expect(p.hasRedirection).toBe(true);
     expect(p.segments).toHaveLength(1);
     expect(p.segments[0]!.argv).toEqual(["node", "app.js"]);
+    expect(p.segments[0]!.redirectTargets).toEqual(["log", "err"]);
   });
 
   it("flags subshell from $(…)", () => {

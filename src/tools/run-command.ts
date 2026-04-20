@@ -12,15 +12,20 @@
 import { execa } from "execa";
 import { z } from "zod";
 
-import { startBackgroundJob, waitForJob } from "../runtime/background-jobs.js";
+import {
+  adoptBackgroundProcess,
+  createManagedBackgroundJob,
+  startBackgroundJob,
+  waitForJob,
+} from "../runtime/background-jobs.js";
 import { touchesProtectedPath } from "../runtime/protected-paths.js";
 import { resolveWithinWorkspace } from "../runtime/workspace.js";
 import type { ToolDefinition } from "../types.js";
 import { parseCommand } from "./command-parser.js";
-import { acquirePersistentShell } from "./persistent-shell.js";
+import { acquirePersistentShell, detachPersistentShell, type PersistentShell } from "./persistent-shell.js";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 10 * 60_000;
+const DEFAULT_TIMEOUT_MS = MAX_TIMEOUT_MS;
 const MAX_OUTPUT_BYTES = 30 * 1024; // ~30KB, aligned with opencode/crush
 const DEFAULT_AUTO_BACKGROUND_MS = 60_000; // crush default
 const FAST_FAILURE_WINDOW_MS = 1_000; // crush default
@@ -87,11 +92,15 @@ export const runCommandTool: ToolDefinition<z.infer<typeof input>> = {
   risk: "execute",
   source: "builtin",
   async run(args, ctx) {
-    const cwd = await resolveWithinWorkspace(ctx.workspaceRoot, args.cwd ?? ".");
     const timeout = args.timeout_ms ?? DEFAULT_TIMEOUT_MS;
     const inactivity = args.inactivity_ms ?? timeout;
     const autoBgAfter = args.auto_background_after_ms ?? DEFAULT_AUTO_BACKGROUND_MS;
     const usePersistent = args.use_persistent_shell ?? defaultPersistentShellEnabled();
+    const workspaceCwd = await resolveWithinWorkspace(ctx.workspaceRoot, ".");
+    const shell = usePersistent ? acquirePersistentShell(ctx.sessionId, workspaceCwd) : null;
+    const cwd = args.cwd
+      ? await resolveWithinWorkspace(ctx.workspaceRoot, args.cwd)
+      : (shell?.cwd ?? workspaceCwd);
 
     // Parse + protected-path check happen here even though the policy already
     // ran the catastrophic + sensitive checks: paths are filesystem-aware and
@@ -119,6 +128,7 @@ export const runCommandTool: ToolDefinition<z.infer<typeof input>> = {
 
     if (usePersistent) {
       return runWithPersistentShell({
+        shell: shell!,
         sessionId: ctx.sessionId,
         command: args.command,
         cwd,
@@ -154,52 +164,70 @@ type RunFgOpts = {
   readonly emitOutput?: (chunk: { stream: "stdout" | "stderr"; text: string }) => void;
 };
 
-async function runWithPersistentShell(opts: RunFgOpts) {
-  const shell = acquirePersistentShell(opts.sessionId, opts.cwd);
+async function runWithPersistentShell(opts: RunFgOpts & { readonly shell: PersistentShell }) {
+  const shell = opts.shell;
+  if (shell.isBusy()) {
+    return runTransient(opts);
+  }
   // Ensure the shell knows we're calling from `opts.cwd`; the wrapper
   // `cd`s into shell.cwd which we override here for this call only.
   const wrapped = `cd ${quote(opts.cwd)} 2>/dev/null && { ${opts.command}; }`;
 
-  // Auto-background: race the run against an internal stopwatch. If we hit
-  // `autoBgAfter` while still running, kill the foreground attempt and
-  // re-spawn the same command as a background job (the persistent shell
-  // would still be busy waiting otherwise).
-  let bgFired = false;
-  const bgTimer = setTimeout(async () => {
-    bgFired = true;
-    await shell.killChildren().catch(() => undefined);
-  }, opts.autoBgAfter);
+  let stdout = "";
+  let stderr = "";
+  let managed: ReturnType<typeof createManagedBackgroundJob> | null = null;
 
   try {
-    const result = await shell.run(wrapped, {
+    const runPromise = shell.run(wrapped, {
       timeoutMs: opts.timeout,
       inactivityMs: opts.inactivity,
       abortSignal: opts.signal,
-      ...(opts.emitOutput
-        ? {
-            onChunk: (stream, text) => opts.emitOutput!({ stream, text }),
-          }
-        : {}),
+      onChunk: (stream, text) => {
+        if (stream === "stdout") stdout += text;
+        else stderr += text;
+        opts.emitOutput?.({ stream, text });
+        managed?.append(stream, text);
+      },
     });
-    if (bgFired) {
-      // We already killed the persistent-shell child; promote to a background job.
-      const promoted = startBackgroundJob({
-        sessionId: opts.sessionId,
-        command: opts.command,
-        cwd: opts.cwd,
-      });
-      return {
-        ok: true,
-        output:
-          `Command auto-backgrounded after ${opts.autoBgAfter}ms.\n` +
-          `Foreground attempt produced ${result.stdout.length}B stdout, ${result.stderr.length}B stderr; both discarded.\n` +
-          `Background job id: ${promoted.id}\n` +
-          `Use \`job_output({ id: "${promoted.id}" })\` to check progress.`,
-      };
+
+    const winner = await Promise.race([
+      runPromise.then((result) => ({ kind: "done" as const, result })),
+      delay(opts.autoBgAfter).then(() => ({ kind: "background" as const })),
+    ]);
+
+    if (winner.kind === "done") {
+      return formatForegroundResult(opts.command, winner.result);
     }
-    return formatForegroundResult(opts.command, result);
-  } finally {
-    clearTimeout(bgTimer);
+
+    managed = createManagedBackgroundJob({
+      sessionId: opts.sessionId,
+      command: opts.command,
+      cwd: opts.cwd,
+      stdout,
+      stderr,
+      kill: () => shell.killChildren(),
+    });
+    detachPersistentShell(opts.sessionId, shell);
+    runPromise.then((result) => {
+      managed?.complete({
+        exitCode: result.exitCode,
+        killed: result.aborted || result.timedOut,
+      });
+      void shell.close();
+    }).catch(() => {
+      managed?.complete({ exitCode: null, killed: true });
+      void shell.close();
+    });
+
+    return {
+      ok: true,
+      output:
+        `Command auto-backgrounded after ${opts.autoBgAfter}ms.\n` +
+        `Background job id: ${managed.job.id}\n` +
+        `Use \`job_output({ id: "${managed.job.id}" })\` to check progress.`,
+    };
+  } catch (err) {
+    return { ok: false, output: `Command failed to start: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 
@@ -209,7 +237,6 @@ async function runTransient(opts: RunFgOpts) {
   let stderr = "";
   let lastActivity = startedAt;
   let timedOut = false;
-  let bgFired = false;
 
   const proc = execa(opts.command, {
     shell: "/bin/sh",
@@ -250,25 +277,28 @@ async function runTransient(opts: RunFgOpts) {
       } catch {
         // ignore
       }
-    } else if (now - startedAt > opts.autoBgAfter) {
-      bgFired = true;
-      try {
-        proc.kill("SIGTERM");
-      } catch {
-        // ignore
-      }
     }
   }, 200);
 
   try {
-    const result = await proc;
+    const winner = await Promise.race([
+      proc.then((result) => ({ kind: "done" as const, result })).catch((err: unknown) => ({
+        kind: "error" as const,
+        err,
+      })),
+      delay(opts.autoBgAfter).then(() => ({ kind: "background" as const })),
+    ]);
+
     clearInterval(ticker);
 
-    if (bgFired) {
-      const promoted = startBackgroundJob({
+    if (winner.kind === "background") {
+      const promoted = adoptBackgroundProcess({
         sessionId: opts.sessionId,
         command: opts.command,
         cwd: opts.cwd,
+        proc,
+        stdout,
+        stderr,
       });
       return {
         ok: true,
@@ -279,12 +309,17 @@ async function runTransient(opts: RunFgOpts) {
       };
     }
 
+    if (winner.kind === "error") {
+      const msg = winner.err instanceof Error ? winner.err.message : String(winner.err);
+      return { ok: false, output: `Command failed to start: ${msg}` };
+    }
+
     return formatForegroundResult(opts.command, {
-      exitCode: result.exitCode ?? null,
+      exitCode: winner.result.exitCode ?? null,
       stdout,
       stderr,
       timedOut,
-      aborted: result.isCanceled,
+      aborted: winner.result.isCanceled,
       durationMs: Date.now() - startedAt,
       cwd: opts.cwd,
     });
@@ -332,7 +367,7 @@ async function runAsBackground(opts: RunBgOpts) {
     output:
       `Started background job: ${job.id}\n` +
       `Use \`job_output({ id: "${job.id}" })\` to read progress, ` +
-      `or \`job_output({ id: "${job.id}", kill: true })\` to terminate.`,
+      `or \`job_kill({ id: "${job.id}" })\` to terminate.`,
   };
 }
 
@@ -389,6 +424,10 @@ function appendCapped(current: string, addition: string): string {
 
 function quote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

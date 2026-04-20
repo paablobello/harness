@@ -35,7 +35,8 @@ export type BackgroundJob = {
 };
 
 type InternalJob = BackgroundJob & {
-  readonly proc: ReturnType<typeof execa>;
+  readonly proc?: ReturnType<typeof execa>;
+  readonly killFn?: () => Promise<void> | void;
 };
 
 const jobsBySession = new Map<string, Map<string, InternalJob>>();
@@ -48,7 +49,6 @@ export type StartJobOptions = {
 };
 
 export function startBackgroundJob(opts: StartJobOptions): BackgroundJob {
-  const id = randomUUID();
   const proc = execa(opts.command, {
     shell: "/bin/sh",
     cwd: opts.cwd,
@@ -59,6 +59,95 @@ export function startBackgroundJob(opts: StartJobOptions): BackgroundJob {
     buffer: false,
   });
 
+  return adoptBackgroundProcess({
+    sessionId: opts.sessionId,
+    command: opts.command,
+    cwd: opts.cwd,
+    proc,
+  });
+}
+
+export type AdoptProcessOptions = {
+  readonly sessionId: string;
+  readonly command: string;
+  readonly cwd: string;
+  readonly proc: ReturnType<typeof execa>;
+  readonly stdout?: string;
+  readonly stderr?: string;
+};
+
+export function adoptBackgroundProcess(opts: AdoptProcessOptions): BackgroundJob {
+  const job = createInternalJob({
+    sessionId: opts.sessionId,
+    command: opts.command,
+    cwd: opts.cwd,
+    stdout: opts.stdout ?? "",
+    stderr: opts.stderr ?? "",
+    proc: opts.proc,
+  });
+
+  opts.proc.stdout?.on("data", (chunk: Buffer | string) => {
+    job.stdout = appendCapped(job.stdout, chunk.toString());
+  });
+  opts.proc.stderr?.on("data", (chunk: Buffer | string) => {
+    job.stderr = appendCapped(job.stderr, chunk.toString());
+  });
+
+  opts.proc.then((result) => {
+    completeJob(job, result.exitCode ?? null);
+  }).catch(() => {
+    completeJob(job, null);
+  });
+
+  return snapshot(job);
+}
+
+export type ManagedBackgroundJob = {
+  readonly job: BackgroundJob;
+  append(stream: "stdout" | "stderr", text: string): void;
+  complete(opts: { exitCode: number | null; killed?: boolean }): void;
+};
+
+export function createManagedBackgroundJob(opts: {
+  readonly sessionId: string;
+  readonly command: string;
+  readonly cwd: string;
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly kill?: () => Promise<void> | void;
+}): ManagedBackgroundJob {
+  const job = createInternalJob({
+    sessionId: opts.sessionId,
+    command: opts.command,
+    cwd: opts.cwd,
+    stdout: opts.stdout ?? "",
+    stderr: opts.stderr ?? "",
+    ...(opts.kill ? { killFn: opts.kill } : {}),
+  });
+
+  return {
+    job: snapshot(job),
+    append(stream, text) {
+      if (stream === "stdout") job.stdout = appendCapped(job.stdout, text);
+      else job.stderr = appendCapped(job.stderr, text);
+    },
+    complete({ exitCode, killed = false }) {
+      job.killed = job.killed || killed;
+      completeJob(job, exitCode);
+    },
+  };
+}
+
+function createInternalJob(opts: {
+  readonly sessionId: string;
+  readonly command: string;
+  readonly cwd: string;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly proc?: ReturnType<typeof execa>;
+  readonly killFn?: () => Promise<void> | void;
+}): InternalJob {
+  const id = randomUUID();
   const job: InternalJob = {
     id,
     command: opts.command,
@@ -67,27 +156,12 @@ export function startBackgroundJob(opts: StartJobOptions): BackgroundJob {
     done: false,
     exitCode: null,
     killed: false,
-    stdout: "",
-    stderr: "",
+    stdout: appendCapped("", opts.stdout),
+    stderr: appendCapped("", opts.stderr),
     endedAt: null,
-    proc,
+    ...(opts.proc ? { proc: opts.proc } : {}),
+    ...(opts.killFn ? { killFn: opts.killFn } : {}),
   };
-
-  proc.stdout?.on("data", (chunk: Buffer | string) => {
-    job.stdout = appendCapped(job.stdout, chunk.toString());
-  });
-  proc.stderr?.on("data", (chunk: Buffer | string) => {
-    job.stderr = appendCapped(job.stderr, chunk.toString());
-  });
-
-  proc.then((result) => {
-    job.done = true;
-    job.exitCode = result.exitCode ?? null;
-    job.endedAt = Date.now();
-  }).catch(() => {
-    job.done = true;
-    job.endedAt = Date.now();
-  });
 
   let bucket = jobsBySession.get(opts.sessionId);
   if (!bucket) {
@@ -96,7 +170,7 @@ export function startBackgroundJob(opts: StartJobOptions): BackgroundJob {
   }
   bucket.set(id, job);
 
-  return snapshot(job);
+  return job;
 }
 
 export function getJob(sessionId: string, jobId: string): BackgroundJob | null {
@@ -142,13 +216,17 @@ export async function killJob(sessionId: string, jobId: string): Promise<Backgro
   if (!job) return null;
   if (job.done) return snapshot(job);
   job.killed = true;
-  try {
-    job.proc.kill("SIGTERM");
-  } catch {
-    // already dead
+  if (job.killFn) {
+    await job.killFn();
+  } else if (job.proc) {
+    try {
+      job.proc.kill("SIGTERM");
+    } catch {
+      // already dead
+    }
   }
   await delay(KILL_GRACE_MS);
-  if (!job.done) {
+  if (!job.done && job.proc) {
     try {
       job.proc.kill("SIGKILL");
     } catch {
@@ -168,21 +246,32 @@ export async function releaseSessionJobs(sessionId: string): Promise<void> {
   for (const job of bucket.values()) {
     if (job.done) continue;
     job.killed = true;
-    try {
-      job.proc.kill("SIGTERM");
-    } catch {
-      // ignore
+    if (job.killFn) {
+      await job.killFn();
+    } else if (job.proc) {
+      try {
+        job.proc.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
     }
   }
   await delay(KILL_GRACE_MS);
   for (const job of bucket.values()) {
-    if (job.done) continue;
+    if (job.done || !job.proc) continue;
     try {
       job.proc.kill("SIGKILL");
     } catch {
       // ignore
     }
   }
+}
+
+function completeJob(job: InternalJob, exitCode: number | null): void {
+  if (job.done) return;
+  job.done = true;
+  job.exitCode = exitCode;
+  job.endedAt = Date.now();
 }
 
 /** Test helper: nuke all sessions. */

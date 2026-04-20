@@ -21,6 +21,8 @@ export type Segment = {
   readonly executable: string;
   /** All string tokens, executable included. Operators are excluded. */
   readonly argv: readonly string[];
+  /** File targets from shell redirections (`> file`, `2> err`, `< input`) in this segment. */
+  readonly redirectTargets: readonly string[];
   /** Original substring of the raw command that this segment came from. */
   readonly rawText: string;
 };
@@ -35,6 +37,8 @@ export type ParsedCommand = {
   readonly hasSubshell: boolean;
   /** True iff the parser hit something it could not classify. Treat as untrusted. */
   readonly parseError: boolean;
+  /** All redirection targets across all segments. Kept so path guards can inspect them. */
+  readonly redirectTargets: readonly string[];
   /**
    * Pipelines: groups of segments connected by `|`. Useful for detecting
    * `curl … | sh` even when split across two segments. A non-pipelined
@@ -68,6 +72,7 @@ export function parseCommand(command: string): ParsedCommand {
       hasPipe: false,
       hasSubshell: false,
       parseError: false,
+      redirectTargets: [],
       pipelines: [],
     };
   }
@@ -137,6 +142,7 @@ export function parseCommand(command: string): ParsedCommand {
   const segments: Segment[] = [];
   const pipelines: Segment[][] = [];
   let currentArgv: string[] = [];
+  let currentRedirectTargets: string[] = [];
   let currentPipeline: Segment[] = [];
   let lastOp: "pipe" | "other" | null = null;
 
@@ -147,15 +153,17 @@ export function parseCommand(command: string): ParsedCommand {
       currentArgv = [];
       return;
     }
-    const seg: Segment = {
-      executable,
-      argv: [...currentArgv],
-      rawText: currentArgv.join(" "),
+      const seg: Segment = {
+        executable,
+        argv: [...currentArgv],
+        redirectTargets: [...currentRedirectTargets],
+        rawText: [...currentArgv, ...currentRedirectTargets.map((t) => `> ${t}`)].join(" "),
+      };
+      segments.push(seg);
+      currentPipeline.push(seg);
+      currentArgv = [];
+      currentRedirectTargets = [];
     };
-    segments.push(seg);
-    currentPipeline.push(seg);
-    currentArgv = [];
-  };
 
   const flushPipeline = (): void => {
     if (currentPipeline.length > 0) {
@@ -176,8 +184,13 @@ export function parseCommand(command: string): ParsedCommand {
       // argument to `node`.
       const last = currentArgv[currentArgv.length - 1];
       if (last !== undefined && /^[0-9]+$/.test(last)) currentArgv.pop();
-      // Skip the next word (the redirect target). It's not part of argv.
-      i += 1;
+      // Capture and skip the next word (the redirect target). It's not part of
+      // argv, but security checks still need to inspect it.
+      const next = tokens[i + 1];
+      if (next?.kind === "word") {
+        currentRedirectTargets.push(next.text);
+        i += 1;
+      }
       continue;
     }
     flushSegment();
@@ -200,6 +213,7 @@ export function parseCommand(command: string): ParsedCommand {
     hasPipe,
     hasSubshell,
     parseError,
+    redirectTargets: segments.flatMap((s) => s.redirectTargets),
     pipelines,
   };
 }
@@ -213,6 +227,7 @@ function fallback(raw: string): ParsedCommand {
   const seg: Segment = {
     executable: firstWord,
     argv: firstWord ? [firstWord] : [],
+    redirectTargets: [],
     rawText: raw,
   };
   return {
@@ -222,6 +237,7 @@ function fallback(raw: string): ParsedCommand {
     hasPipe: false,
     hasSubshell: /\$\(|`/.test(raw),
     parseError: true,
+    redirectTargets: [],
     pipelines: firstWord ? [[seg]] : [],
   };
 }

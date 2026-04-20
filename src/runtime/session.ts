@@ -22,7 +22,11 @@ import { classifyContext, DEFAULT_CONTEXT_THRESHOLDS } from "./context-window.js
 import type { ControlChannel } from "./control.js";
 import { computeCost } from "./cost.js";
 import type { EventSink, HarnessEvent, SessionEndReason } from "./events.js";
-import { PLAN_ENTRY_REMINDER, PLAN_EXIT_REMINDER } from "./plan-mode-prompts.js";
+import {
+  PLAN_ENTRY_REMINDER,
+  PLAN_EXIT_REMINDER,
+  PLAN_PLAINTEXT_REPROMPT,
+} from "./plan-mode-prompts.js";
 import { releasePersistentShell } from "../tools/persistent-shell.js";
 
 /**
@@ -169,6 +173,8 @@ const DEFAULT_REASONING_BY_MODE: Record<PermissionMode, ReasoningSpec | null> = 
   bypassPermissions: null,
 };
 
+const MAX_PLAN_MODE_PLAINTEXT_REPROMPTS = 2;
+
 function resolveReasoningForMode(
   mode: PermissionMode,
   cfg: SessionConfig["reasoning"],
@@ -179,6 +185,70 @@ function resolveReasoningForMode(
   if (override === null) return null;
   if (override !== undefined) return override;
   return DEFAULT_REASONING_BY_MODE[mode];
+}
+
+function isLikelyPlanModeClarifyingQuestion(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || !/[?¿]/.test(trimmed)) return false;
+  if (hasPlanDeliverySignals(trimmed)) return false;
+
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  return words <= 280;
+}
+
+function hasPlanDeliverySignals(text: string): boolean {
+  const lower = text.toLowerCase();
+  const sectionSignals = [
+    "## objective",
+    "## affected files",
+    "## approach",
+    "## steps",
+    "## risks",
+    "## verification",
+    "## objetivo",
+    "## archivos afectados",
+    "## enfoque",
+    "## pasos",
+    "## riesgos",
+    "## verificación",
+    "## verificacion",
+    "balance general",
+    "prioridad sugerida",
+    "conclusión",
+    "conclusion",
+  ];
+  if (sectionSignals.some((signal) => lower.includes(signal))) return true;
+
+  const headingCount = (text.match(/^\s{0,3}#{1,6}\s+\S/gm) ?? []).length;
+  if (headingCount >= 2) return true;
+
+  const listItemCount = (text.match(/^\s*(?:\d+\.|[-*•])\s+\S/gm) ?? []).length;
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return listItemCount >= 5 && words > 220;
+}
+
+function shouldRepromptPlanModePlaintext(args: {
+  mode: PermissionMode;
+  stopReason: "end_turn" | "max_tokens" | "tool_use" | "error";
+  toolCalls: readonly ToolCall[];
+  assistantText: string;
+}): boolean {
+  if (args.mode !== "plan") return false;
+  if (args.stopReason !== "end_turn") return false;
+  if (args.toolCalls.length > 0) return false;
+  const text = args.assistantText.trim();
+  if (!text) return false;
+  return !isLikelyPlanModeClarifyingQuestion(text);
+}
+
+function shouldSuppressPlanModeNarration(args: {
+  mode: PermissionMode;
+  toolCalls: readonly ToolCall[];
+  assistantText: string;
+}): boolean {
+  if (args.mode !== "plan") return false;
+  if (!args.toolCalls.some((call) => call.name === "exit_plan_mode")) return false;
+  return hasPlanDeliverySignals(args.assistantText);
 }
 
 const DEFAULT_SUBAGENT_SYSTEM =
@@ -677,6 +747,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
       messages.push({ role: "user", content: userInput });
 
       let toolsThisUserTurn = 0;
+      let planModePlaintextRepromptsThisUserTurn = 0;
 
       modelLoop: while (true) {
         while (pendingReminders.length > 0) {
@@ -690,10 +761,8 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         let stopReason: "end_turn" | "max_tokens" | "tool_use" | "error" = "end_turn";
         let errorMsg: string | undefined;
 
-        const reasoning = resolveReasoningForMode(
-          cfg.policy?.getMode() ?? "default",
-          cfg.reasoning,
-        );
+        const permissionModeAtTurnStart = cfg.policy?.getMode() ?? "default";
+        const reasoning = resolveReasoningForMode(permissionModeAtTurnStart, cfg.reasoning);
         const turnInput = {
           system: cfg.system,
           messages,
@@ -701,11 +770,27 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
           ...(reasoning ? { reasoning } : {}),
         };
 
+        const bufferAssistantText = permissionModeAtTurnStart === "plan";
+        const bufferedAssistantDeltas: string[] = [];
+        let assistantTextFlushed = !bufferAssistantText;
+        const emitAssistantDelta = (text: string): void => {
+          cfg.onAssistantDelta?.(text);
+          cfg.sink.write({ ...base(), event: "AssistantTextDelta", text });
+        };
+        const flushAssistantText = (): void => {
+          if (assistantTextFlushed) return;
+          assistantTextFlushed = true;
+          for (const text of bufferedAssistantDeltas) emitAssistantDelta(text);
+        };
+
         for await (const event of cfg.adapter.runTurn(turnInput, signal)) {
           if (event.type === "text_delta") {
             assistantText += event.text;
-            cfg.onAssistantDelta?.(event.text);
-            cfg.sink.write({ ...base(), event: "AssistantTextDelta", text: event.text });
+            if (bufferAssistantText) {
+              bufferedAssistantDeltas.push(event.text);
+            } else {
+              emitAssistantDelta(event.text);
+            }
           } else if (event.type === "tool_call") {
             toolCalls.push({ id: event.id, name: event.name, input: event.input });
           } else if (event.type === "usage") {
@@ -720,15 +805,29 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
           }
         }
 
-        if (assistantText || toolCalls.length > 0) {
-          if (assistantText) {
-            cfg.sink.write({ ...base(), event: "AssistantMessage", text: assistantText });
-            cfg.onAssistantMessage?.(assistantText);
-            lastAssistantMessage = assistantText;
+        const repromptPlanModePlaintext = shouldRepromptPlanModePlaintext({
+          mode: permissionModeAtTurnStart,
+          stopReason,
+          toolCalls,
+          assistantText,
+        });
+        const suppressAssistantText = shouldSuppressPlanModeNarration({
+          mode: permissionModeAtTurnStart,
+          toolCalls,
+          assistantText,
+        });
+        const assistantContent = suppressAssistantText ? "" : assistantText;
+
+        if (!repromptPlanModePlaintext && (assistantContent || toolCalls.length > 0)) {
+          if (assistantContent) {
+            flushAssistantText();
+            cfg.sink.write({ ...base(), event: "AssistantMessage", text: assistantContent });
+            cfg.onAssistantMessage?.(assistantContent);
+            lastAssistantMessage = assistantContent;
           }
           messages.push({
             role: "assistant",
-            content: assistantText,
+            content: assistantContent,
             ...(toolCalls.length > 0 ? { toolCalls } : {}),
           });
         }
@@ -764,6 +863,24 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         }
 
         turns += 1;
+
+        if (repromptPlanModePlaintext) {
+          planModePlaintextRepromptsThisUserTurn += 1;
+          if (planModePlaintextRepromptsThisUserTurn > MAX_PLAN_MODE_PLAINTEXT_REPROMPTS) {
+            const msg =
+              "plan mode enforcement stopped after repeated plain-text responses; " +
+              "the model must call exit_plan_mode to submit a plan";
+            cfg.onModelError?.(msg);
+            if (cfg.continueOnModelError) {
+              await runAfterTurnSensors();
+              break modelLoop;
+            }
+            endReason = "error";
+            break userLoop;
+          }
+          pendingReminders.push(PLAN_PLAINTEXT_REPROMPT);
+          continue modelLoop;
+        }
 
         if (stopReason === "error") {
           cfg.onModelError?.(errorMsg ?? "model call failed");

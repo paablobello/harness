@@ -111,23 +111,38 @@ export function touchesProtectedPath(
     // as the command they're asking for that, but `cat .git/HEAD` is what we
     // want to catch — that's argv[1].
     for (let i = 1; i < seg.argv.length; i++) {
-      const token = seg.argv[i]!;
-      if (!looksLikePath(token)) continue;
-      const expanded = expandPath(token, home, cwd);
-      const normalized = normalize(expanded);
+      const hit = protectedPathHit(seg.argv[i]!, exe, absoluteRules, home, cwd);
+      if (hit) return hit;
+    }
+    for (const token of seg.redirectTargets) {
+      const hit = protectedPathHit(token, exe, absoluteRules, home, cwd);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
 
-      for (const rule of absoluteRules) {
-        if (pathStartsWith(normalized, rule)) {
-          return { token, rule, executable: exe };
-        }
-      }
+function protectedPathHit(
+  token: string,
+  executable: string,
+  absoluteRules: readonly string[],
+  home: string,
+  cwd: string,
+): ProtectedPathHit | null {
+  if (!looksLikePath(token)) return null;
+  const expanded = expandPath(token, home, cwd);
+  const normalized = normalize(expanded);
 
-      const base = basenameOf(normalized);
-      for (const re of PROTECTED_BASENAME_PATTERNS) {
-        if (re.test(base)) {
-          return { token, rule: re.source, executable: exe };
-        }
-      }
+  for (const rule of absoluteRules) {
+    if (pathStartsWith(normalized, rule)) {
+      return { token, rule, executable };
+    }
+  }
+
+  const base = basenameOf(normalized);
+  for (const re of PROTECTED_BASENAME_PATTERNS) {
+    if (re.test(base)) {
+      return { token, rule: re.source, executable };
     }
   }
   return null;

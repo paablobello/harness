@@ -1,10 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { __resetBackgroundJobs } from "../../src/runtime/background-jobs.js";
+import { __resetBackgroundJobs, waitForJob } from "../../src/runtime/background-jobs.js";
 import { __resetPersistentShells } from "../../src/tools/persistent-shell.js";
 import { runCommandTool } from "../../src/tools/run-command.js";
 import type { ToolContext } from "../../src/types.js";
@@ -58,6 +58,13 @@ describe("run_command", () => {
     expect(r.output).toContain("protected path");
   });
 
+  it("denies protected redirection targets", async () => {
+    const r = await runCommandTool.run({ command: "echo TOKEN > .env" }, ctx());
+    expect(r.ok).toBe(false);
+    expect(r.output).toContain("protected path");
+    expect(r.output).toContain(".env");
+  });
+
   it("streams stdout chunks via emitOutput", async () => {
     const chunks: { stream: string; text: string }[] = [];
     const r = await runCommandTool.run(
@@ -84,6 +91,35 @@ describe("run_command", () => {
     );
     expect(r.ok).toBe(true);
     expect(r.output).toMatch(/Background job id|auto-backgrounded/);
+  }, 10_000);
+
+  it("auto-background adopts the existing process instead of restarting it", async () => {
+    const context = ctx();
+    const r = await runCommandTool.run(
+      {
+        command: "printf start >> marker; sleep 0.5; printf done >> marker",
+        auto_background_after_ms: 100,
+      },
+      context,
+    );
+    expect(r.ok).toBe(true);
+    const jobId = /Background job id: ([0-9a-f-]+)/.exec(r.output)?.[1];
+    expect(jobId).toBeDefined();
+    const settled = await waitForJob(context.sessionId, jobId!, 3_000);
+    expect(settled?.done).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await readFile(join(root, "marker"), "utf8")).toBe("startdone");
+  }, 10_000);
+
+  it("preserves persistent cwd between run_command calls", async () => {
+    const context = ctx();
+    const first = await runCommandTool.run({ command: "mkdir sub && cd sub && pwd" }, context);
+    expect(first.ok).toBe(true);
+    expect(first.output).toContain("/sub");
+
+    const second = await runCommandTool.run({ command: "pwd" }, context);
+    expect(second.ok).toBe(true);
+    expect(second.output).toContain("/sub");
   }, 10_000);
 
   it("fast-failure: a background command that exits in <1s is returned synchronously", async () => {

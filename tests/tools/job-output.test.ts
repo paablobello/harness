@@ -9,6 +9,7 @@ import {
   startBackgroundJob,
   waitForJob,
 } from "../../src/runtime/background-jobs.js";
+import { jobKillTool } from "../../src/tools/job-kill.js";
 import { jobOutputTool } from "../../src/tools/job-output.js";
 import type { ToolContext } from "../../src/types.js";
 
@@ -68,7 +69,7 @@ describe("job_output", () => {
       command: "sleep 30",
       cwd: root,
     });
-    const r = await jobOutputTool.run({ id: job.id, kill: true }, ctx());
+    const r = await jobKillTool.run({ id: job.id }, ctx());
     expect(r.output).toContain("Killed");
   }, 10_000);
 

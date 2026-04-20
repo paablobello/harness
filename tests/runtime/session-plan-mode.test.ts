@@ -188,6 +188,121 @@ describe("plan mode — session integration", () => {
     }
   });
 
+  it("reprompts instead of surfacing final plain text while in plan mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-plaintext-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const leakedPlan =
+        "## Objective\nDo the thing.\n\n" +
+        "## Affected files\n- src/runtime/session.ts\n- tests/runtime/session-plan-mode.test.ts\n\n" +
+        "## Steps\n1. Patch runtime\n2. Add tests\n3. Run verification";
+
+      const { adapter, seenMessages } = createRecordingAdapter([
+        [
+          { type: "text_delta", text: leakedPlan },
+          { type: "usage", inputTokens: 10, outputTokens: 20 },
+          { type: "stop", reason: "end_turn" },
+        ],
+        [
+          {
+            type: "tool_call",
+            id: "c-exit",
+            name: "exit_plan_mode",
+            input: { plan: validPlanText("Guard plan mode") },
+          },
+          { type: "usage", inputTokens: 11, outputTokens: 21 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "approved" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      const askPlan: AskPlan = async () => ({ approved: true });
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        askPlan,
+        input: queuedInput(["audit the repo"]),
+      });
+
+      expect(policy.getMode()).toBe("default");
+
+      const secondTurn = seenMessages[1] ?? [];
+      expect(
+        secondTurn.some(
+          (m) =>
+            m.role === "user" &&
+            m.content.includes("previous response tried to finish in") &&
+            m.content.includes("exit_plan_mode"),
+        ),
+      ).toBe(true);
+
+      const assistantMessages = sink.events
+        .filter((e) => e.event === "AssistantMessage")
+        .map((e) => ("text" in e ? e.text : ""));
+      expect(assistantMessages.join("\n")).not.toContain("## Objective");
+
+      const assistantDeltas = sink.events
+        .filter((e) => e.event === "AssistantTextDelta")
+        .map((e) => ("text" in e ? e.text : ""));
+      expect(assistantDeltas.join("\n")).not.toContain("## Objective");
+
+      const files = await readdir(join(root, ".harness", "plans"));
+      expect(files).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("still allows a plain clarifying question in plan mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-question-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const question = "¿Qué área quieres que priorice: runtime, CLI, o tests?";
+      const { adapter, seenMessages } = createRecordingAdapter([
+        [
+          { type: "text_delta", text: question },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        input: queuedInput(["analyze improvements"]),
+      });
+
+      expect(policy.getMode()).toBe("plan");
+      expect(seenMessages).toHaveLength(1);
+
+      const assistantMsg = sink.events.find((e) => e.event === "AssistantMessage");
+      expect(assistantMsg).toMatchObject({ text: question });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("exit_plan_mode approval writes plan.md and restores previous mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "harness-plan-approve-"));
     try {
