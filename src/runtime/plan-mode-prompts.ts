@@ -27,6 +27,9 @@ HARD CONSTRAINTS:
 - Before calling \`exit_plan_mode\`, you MUST have made at least 3 read-only
   tool calls (read_file / list_files / grep_files) on files directly relevant
   to the change. Do not rely on filenames or your priors — actually open them.
+- Three read-only calls is a floor, not a target for exhaustive scanning. Keep
+  exploration focused; once you have enough evidence for a concrete plan, stop
+  reading and call \`exit_plan_mode\`.
 - Do NOT announce the plan in regular assistant text. The plan lives inside
   the \`exit_plan_mode\` tool call and nowhere else.
 
@@ -84,6 +87,13 @@ export const PLAN_REJECTED_REMINDER = `<system-reminder>
 The user rejected the plan. Plan mode is still active. Read their feedback
 in the last tool result, revise your plan accordingly, and call
 \`exit_plan_mode\` again with the updated plan when ready.
+</system-reminder>`;
+
+export const PLAN_TOOL_BUDGET_EXHAUSTED_REMINDER = `<system-reminder>
+The read-tool budget for this user request is exhausted. Do not call more
+read_file / list_files / grep_files tools in this request. If you have enough
+context, call \`exit_plan_mode\` now; it remains available even after tool-budget
+exhaustion. If you do not have enough context, ask the user to narrow the scope.
 </system-reminder>`;
 
 export const PLAN_PLAINTEXT_REPROMPT = `<system-reminder>

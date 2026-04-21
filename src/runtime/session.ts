@@ -26,6 +26,7 @@ import {
   PLAN_ENTRY_REMINDER,
   PLAN_EXIT_REMINDER,
   PLAN_PLAINTEXT_REPROMPT,
+  PLAN_TOOL_BUDGET_EXHAUSTED_REMINDER,
 } from "./plan-mode-prompts.js";
 import { releasePersistentShell } from "../tools/persistent-shell.js";
 
@@ -99,11 +100,7 @@ export type SessionConfig = {
     error?: string;
   }) => void;
   onHistoryCleared?: (info: { messagesDropped: number }) => void;
-  onContextWarning?: (info: {
-    inputTokens: number;
-    contextWindow: number;
-    ratio: number;
-  }) => void;
+  onContextWarning?: (info: { inputTokens: number; contextWindow: number; ratio: number }) => void;
   onPermissionModeChanged?: (info: {
     from: PermissionMode;
     to: PermissionMode;
@@ -248,7 +245,7 @@ function shouldSuppressPlanModeNarration(args: {
 }): boolean {
   if (args.mode !== "plan") return false;
   if (!args.toolCalls.some((call) => call.name === "exit_plan_mode")) return false;
-  return hasPlanDeliverySignals(args.assistantText);
+  return args.assistantText.trim().length > 0;
 }
 
 const DEFAULT_SUBAGENT_SYSTEM =
@@ -324,8 +321,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
   // *starts* in plan mode (via `--permission-mode plan`) we have no record of
   // a prior mode, so we fall back to "default" on exit.
   const startingMode = cfg.policy?.getMode() ?? "default";
-  let previousPermissionMode: PermissionMode =
-    startingMode === "plan" ? "default" : startingMode;
+  let previousPermissionMode: PermissionMode = startingMode === "plan" ? "default" : startingMode;
   if (startingMode === "plan") {
     pendingReminders.push(PLAN_ENTRY_REMINDER);
   }
@@ -519,7 +515,10 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
     }
 
     const started = Date.now();
-    const snapshotPath = join(snapshotDir, `${String(compactionCounter + 1).padStart(4, "0")}-${Date.now()}.jsonl`);
+    const snapshotPath = join(
+      snapshotDir,
+      `${String(compactionCounter + 1).padStart(4, "0")}-${Date.now()}.jsonl`,
+    );
     const compactStart: Extract<HarnessEvent, { event: "CompactStart" }> = {
       ...base(),
       event: "CompactStart",
@@ -748,6 +747,7 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
 
       let toolsThisUserTurn = 0;
       let planModePlaintextRepromptsThisUserTurn = 0;
+      let planToolBudgetReminderQueuedThisUserTurn = false;
 
       modelLoop: while (true) {
         while (pendingReminders.length > 0) {
@@ -898,8 +898,27 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
         }
 
         for (const call of toolCalls) {
-          if (toolsThisUserTurn >= maxTools) {
-            const output = `Aborted: exceeded max ${maxTools} tool calls per user turn.`;
+          cfg.sink.write({
+            ...base(),
+            event: "ToolCall",
+            tool_use_id: call.id,
+            tool_name: call.name,
+            tool_input: call.input,
+          });
+          cfg.onToolCall?.(call);
+
+          const permissionModeForTool = cfg.policy?.getMode() ?? "default";
+          const isPlanExitCall = permissionModeForTool === "plan" && call.name === "exit_plan_mode";
+
+          if (toolsThisUserTurn >= maxTools && !isPlanExitCall) {
+            const output =
+              permissionModeForTool === "plan"
+                ? `Aborted: exceeded max ${maxTools} tool calls per user turn. Plan mode is still active, but the exploratory tool budget is exhausted. Do not call more read/list/grep tools in this request. If you have enough context, call exit_plan_mode now; exit_plan_mode is still allowed after this limit.`
+                : `Aborted: exceeded max ${maxTools} tool calls per user turn.`;
+            if (permissionModeForTool === "plan" && !planToolBudgetReminderQueuedThisUserTurn) {
+              planToolBudgetReminderQueuedThisUserTurn = true;
+              pendingReminders.push(PLAN_TOOL_BUDGET_EXHAUSTED_REMINDER);
+            }
             cfg.sink.write({
               ...base(),
               event: "ToolResult",
@@ -920,15 +939,6 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
             continue;
           }
           toolsThisUserTurn += 1;
-
-          cfg.sink.write({
-            ...base(),
-            event: "ToolCall",
-            tool_use_id: call.id,
-            tool_name: call.name,
-            tool_input: call.input,
-          });
-          cfg.onToolCall?.(call);
 
           const tool = cfg.tools?.get(call.name);
           if (!tool) {
@@ -1113,6 +1123,15 @@ export async function runSession(cfg: SessionConfig): Promise<RunSummary> {
               output: result.output,
               durationMs: duration,
             });
+            if (
+              call.name === "exit_plan_mode" &&
+              result.meta &&
+              result.meta["autoRejected"] !== true
+            ) {
+              // Plan approval/rejection is user interaction, so treat it as a
+              // fresh budget boundary for the next phase of the same request.
+              toolsThisUserTurn = 0;
+            }
             if (cfg.hooks) {
               const hookPayload = result.ok
                 ? {

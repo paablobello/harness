@@ -179,9 +179,7 @@ describe("plan mode — session integration", () => {
       });
 
       const policyDecisions = sink.events.filter((e) => e.event === "PolicyDecision");
-      const denial = policyDecisions.find(
-        (e) => "tool_name" in e && e.tool_name === "edit_file",
-      );
+      const denial = policyDecisions.find((e) => "tool_name" in e && e.tool_name === "edit_file");
       expect(denial).toMatchObject({ decision: "deny" });
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -298,6 +296,160 @@ describe("plan mode — session integration", () => {
 
       const assistantMsg = sink.events.find((e) => e.event === "AssistantMessage");
       expect(assistantMsg).toMatchObject({ text: question });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows exit_plan_mode after the exploratory tool budget is exhausted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-budget-exit-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const { adapter } = createRecordingAdapter([
+        [
+          {
+            type: "tool_call",
+            id: "c-list",
+            name: "list_files",
+            input: { path: "." },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "Presento el plan para aprobación." },
+          {
+            type: "tool_call",
+            id: "c-exit",
+            name: "exit_plan_mode",
+            input: { plan: validPlanText("Budget exhausted") },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "implementation phase" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      const askPlan: AskPlan = async () => ({ approved: true });
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        askPlan,
+        input: queuedInput(["plan please"]),
+        maxToolsPerUserTurn: 1,
+      });
+
+      expect(policy.getMode()).toBe("default");
+
+      const exitResult = sink.events.find(
+        (e) => e.event === "ToolResult" && e.tool_use_id === "c-exit",
+      );
+      expect(exitResult).toMatchObject({ ok: true });
+      expect(exitResult && "output" in exitResult && exitResult.output).not.toContain(
+        "exceeded max",
+      );
+
+      const assistantText = sink.events
+        .filter((e) => e.event === "AssistantMessage")
+        .map((e) => ("text" in e ? e.text : ""))
+        .join("\n");
+      expect(assistantText).not.toContain("Presento el plan");
+      expect(assistantText).toContain("implementation phase");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("warns the model to stop reading when the plan-mode tool budget is exhausted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harness-plan-budget-reminder-"));
+    try {
+      const sink = new MemoryEventSink();
+      const tools = createBuiltinRegistry();
+      const policy = new PolicyEngine({ rules: defaultPolicy, mode: "plan" });
+
+      const { adapter, seenMessages } = createRecordingAdapter([
+        [
+          {
+            type: "tool_call",
+            id: "c-list",
+            name: "list_files",
+            input: { path: "." },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          {
+            type: "tool_call",
+            id: "c-read",
+            name: "read_file",
+            input: { path: "package.json" },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          {
+            type: "tool_call",
+            id: "c-exit",
+            name: "exit_plan_mode",
+            input: { plan: validPlanText("Budget reminder") },
+          },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "approved" },
+          { type: "usage", inputTokens: 1, outputTokens: 1 },
+          { type: "stop", reason: "end_turn" },
+        ],
+      ]);
+
+      const askPlan: AskPlan = async () => ({ approved: true });
+
+      await runSession({
+        adapter,
+        system: "test",
+        cwd: root,
+        workspaceRoot: root,
+        sink,
+        tools,
+        policy,
+        askPlan,
+        input: queuedInput(["plan please"]),
+        maxToolsPerUserTurn: 1,
+      });
+
+      const readResult = sink.events.find(
+        (e) => e.event === "ToolResult" && e.tool_use_id === "c-read",
+      );
+      expect(readResult && "output" in readResult && readResult.output).toContain(
+        "exit_plan_mode is still allowed",
+      );
+
+      const thirdTurn = seenMessages[2] ?? [];
+      expect(
+        thirdTurn.some(
+          (m) =>
+            m.role === "user" &&
+            m.content.includes("read-tool budget") &&
+            m.content.includes("exit_plan_mode"),
+        ),
+      ).toBe(true);
+      expect(policy.getMode()).toBe("default");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
