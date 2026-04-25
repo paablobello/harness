@@ -259,13 +259,7 @@ export async function compactMessages(
     inputTokens: summaryInputTokens,
     outputTokens: summaryOutputTokens,
     costUsd: summaryCostUsd,
-  } = await runSummarizer(
-    cfg.adapter,
-    summarizerSystem,
-    head,
-    req.instructions,
-    signal,
-  );
+  } = await runSummarizer(cfg.adapter, summarizerSystem, head, req.instructions, signal);
 
   const reminderLines = [
     "<system-reminder>",

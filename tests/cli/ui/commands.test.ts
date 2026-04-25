@@ -100,9 +100,7 @@ describe("dispatchSlash", () => {
   it("/compact warns when the session has no compaction hook wired", () => {
     const dispatch = vi.fn();
     dispatchSlash("/compact", { dispatch, exit: vi.fn(), details: false });
-    expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "INFO", level: "warn" }),
-    );
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "INFO", level: "warn" }));
   });
 
   it("/clear dispatches CLEAR and fires onClear so the runtime drops history", () => {

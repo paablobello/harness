@@ -131,8 +131,7 @@ export function App(props: AppProps): ReactNode {
       }
     },
     {
-      isActive:
-        !externalEditorActive && state.pendingPolicy === null && state.pendingPlan === null,
+      isActive: !externalEditorActive && state.pendingPolicy === null && state.pendingPlan === null,
     },
   );
 

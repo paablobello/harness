@@ -113,7 +113,10 @@ export const exitPlanModeTool: ToolDefinition<Input> = {
   },
 };
 
-async function writePlanFile(cwd: string, plan: string): Promise<{ path: string; filename: string }> {
+async function writePlanFile(
+  cwd: string,
+  plan: string,
+): Promise<{ path: string; filename: string }> {
   const dir = join(cwd, ".harness", "plans");
   await mkdir(dir, { recursive: true });
   const stamp = timestampSlug();
@@ -160,7 +163,8 @@ function assessPlanQuality(plan: string): string | null {
   const numberedSteps = (plan.match(/^\s*\d+\.\s+\S/gm) ?? []).length;
   const bulletSteps = (plan.match(/^\s*[-*]\s+\S/gm) ?? []).length;
   const steps = numberedSteps > 0 ? numberedSteps : bulletSteps;
-  if (steps < 3) issues.push(`only ${steps} step${steps === 1 ? "" : "s"} — break the work down further`);
+  if (steps < 3)
+    issues.push(`only ${steps} step${steps === 1 ? "" : "s"} — break the work down further`);
 
   const lower = plan.toLowerCase();
   const missingSections: string[] = [];

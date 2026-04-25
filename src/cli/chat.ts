@@ -50,7 +50,6 @@ type ChatOptions = {
   tui?: boolean;
 };
 
-
 export function chatCommand(): Command {
   return new Command("chat")
     .description("Start an interactive chat session with the configured model")

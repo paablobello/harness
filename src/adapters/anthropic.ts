@@ -157,9 +157,7 @@ export function createAnthropicAdapter(opts: AnthropicAdapterOptions): ModelAdap
  * — we don't want to render chain-of-thought as assistant text. If a future
  * UI wants to surface it, wire a new `ModelEvent.thinking_delta` there.
  */
-function resolveThinking(
-  input: ModelTurnInput,
-): { type: "enabled"; budget_tokens: number } | null {
+function resolveThinking(input: ModelTurnInput): { type: "enabled"; budget_tokens: number } | null {
   const r = input.reasoning;
   if (!r) return null;
   if (r.effort === "off") return null;

@@ -71,10 +71,7 @@ const HOME_PROTECTED: readonly string[] = [
   ".config/gh",
 ];
 
-const WORKSPACE_PROTECTED: readonly string[] = [
-  ".git",
-  ".harness/runs",
-];
+const WORKSPACE_PROTECTED: readonly string[] = [".git", ".harness/runs"];
 
 /**
  * Glob-ish suffix matchers for filenames anywhere in the tree (matched on the
@@ -164,7 +161,8 @@ function looksLikePath(token: string): boolean {
 function expandPath(token: string, home: string, cwd: string): string {
   let s = token;
   if (s === "~" || s.startsWith("~/")) s = joinPath(home, s.slice(2));
-  if (s === "$HOME" || s.startsWith("$HOME/")) s = joinPath(home, s.slice("$HOME".length).replace(/^\//, ""));
+  if (s === "$HOME" || s.startsWith("$HOME/"))
+    s = joinPath(home, s.slice("$HOME".length).replace(/^\//, ""));
   if (!isAbsolute(s)) s = resolve(cwd, s);
   return s;
 }

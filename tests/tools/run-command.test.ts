@@ -123,20 +123,14 @@ describe("run_command", () => {
   }, 10_000);
 
   it("fast-failure: a background command that exits in <1s is returned synchronously", async () => {
-    const r = await runCommandTool.run(
-      { command: "echo quick", run_in_background: true },
-      ctx(),
-    );
+    const r = await runCommandTool.run({ command: "echo quick", run_in_background: true }, ctx());
     expect(r.ok).toBe(true);
     expect(r.output).toContain("quick");
     expect(r.output).toContain("exit=0");
   });
 
   it("background: a long-running command returns a job id", async () => {
-    const r = await runCommandTool.run(
-      { command: "sleep 5", run_in_background: true },
-      ctx(),
-    );
+    const r = await runCommandTool.run({ command: "sleep 5", run_in_background: true }, ctx());
     expect(r.ok).toBe(true);
     expect(r.output).toMatch(/Started background job/);
   }, 10_000);

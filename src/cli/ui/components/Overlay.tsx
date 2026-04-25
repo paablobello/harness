@@ -9,13 +9,7 @@ import {
 } from "../../../runtime/context-window.js";
 import { hasPricing } from "../../../runtime/cost.js";
 import { SLASH_COMMANDS } from "../commands.js";
-import type {
-  Message,
-  Overlay as OverlayState,
-  ToolStat,
-  TurnStat,
-  UiState,
-} from "../state.js";
+import type { Message, Overlay as OverlayState, ToolStat, TurnStat, UiState } from "../state.js";
 import { useTheme, type Theme } from "../theme.js";
 import { copyToClipboard, openInOs } from "../util/clipboard.js";
 
@@ -133,8 +127,7 @@ function StatusOverlay({ state }: { readonly state: UiState }): ReactNode {
         <Text color={theme.text}>turns {state.stats.turns}</Text>
         <Text color={theme.textDim}>{"  ·  "}</Text>
         <Text color={theme.text}>
-          tokens {formatTokens(state.stats.tokensIn)} in / {formatTokens(state.stats.tokensOut)}{" "}
-          out
+          tokens {formatTokens(state.stats.tokensIn)} in / {formatTokens(state.stats.tokensOut)} out
         </Text>
         <Text color={theme.textDim}>{"  ·  "}</Text>
         <Text color={theme.text}>
@@ -281,7 +274,7 @@ function ModelOverlay({ state }: { readonly state: UiState }): ReactNode {
         flexDirection="column"
       >
         <Box>
-          <Text color={theme.textDim}>model  </Text>
+          <Text color={theme.textDim}>model </Text>
           <Text color={theme.text}>
             {state.session.adapter.name}:{state.session.adapter.model}
           </Text>
@@ -309,7 +302,7 @@ function LogOverlay({ state }: { readonly state: UiState }): ReactNode {
         borderLeftColor={theme.primary}
         paddingX={1}
       >
-        <Text color={theme.textDim}>log  </Text>
+        <Text color={theme.textDim}>log </Text>
         <Text color={theme.text}>{state.session.logPath}</Text>
         <Box flexGrow={1} />
         <Text color={theme.primary}>c</Text>
@@ -488,7 +481,9 @@ function ContextOverlay({ state }: { readonly state: UiState }): ReactNode {
         />
       )}
       <Box marginTop={1}>
-        <Text color={theme.textMuted}>Auto-compact at {compactPct}% · /compact to run manually</Text>
+        <Text color={theme.textMuted}>
+          Auto-compact at {compactPct}% · /compact to run manually
+        </Text>
       </Box>
       <FooterEsc
         hotkeys={[
@@ -540,13 +535,7 @@ function ContextBreakdown({
         color={theme.secondary}
         theme={theme}
       />
-      <BreakdownRow
-        label="free"
-        tokens={free}
-        total={total}
-        color={theme.textDim}
-        theme={theme}
-      />
+      <BreakdownRow label="free" tokens={free} total={total} color={theme.textDim} theme={theme} />
       <Box marginTop={1}>
         <Text color={theme.text}>
           {formatTokens(used)} / {formatTokens(total)}

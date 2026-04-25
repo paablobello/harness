@@ -19,33 +19,39 @@ type Capture = {
   responsesCalls: Record<string, unknown>[];
 };
 
-function makeFakeClient(opts: {
-  readonly chatStream?: () => AsyncIterable<Record<string, unknown>>;
-  readonly responsesStream?: () => AsyncIterable<Record<string, unknown>>;
-} = {}): { client: unknown; capture: Capture } {
+function makeFakeClient(
+  opts: {
+    readonly chatStream?: () => AsyncIterable<Record<string, unknown>>;
+    readonly responsesStream?: () => AsyncIterable<Record<string, unknown>>;
+  } = {},
+): { client: unknown; capture: Capture } {
   const capture: Capture = { chatCalls: [], responsesCalls: [] };
 
-  const chatStream = opts.chatStream ?? async function* () {
-    yield {
-      choices: [{ delta: { content: "hi" }, finish_reason: "stop" }],
+  const chatStream =
+    opts.chatStream ??
+    async function* () {
+      yield {
+        choices: [{ delta: { content: "hi" }, finish_reason: "stop" }],
+      };
+      yield {
+        choices: [{ delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 3, completion_tokens: 1 },
+      };
     };
-    yield {
-      choices: [{ delta: {}, finish_reason: "stop" }],
-      usage: { prompt_tokens: 3, completion_tokens: 1 },
-    };
-  };
 
-  const responsesStream = opts.responsesStream ?? async function* () {
-    yield { type: "response.output_text.delta", delta: "hi" };
-    yield {
-      type: "response.completed",
-      response: {
-        status: "completed",
-        usage: { input_tokens: 3, output_tokens: 1 },
-        output: [],
-      },
+  const responsesStream =
+    opts.responsesStream ??
+    async function* () {
+      yield { type: "response.output_text.delta", delta: "hi" };
+      yield {
+        type: "response.completed",
+        response: {
+          status: "completed",
+          usage: { input_tokens: 3, output_tokens: 1 },
+          output: [],
+        },
+      };
     };
-  };
 
   const client = {
     chat: {
@@ -251,7 +257,12 @@ describe("OpenAI adapter — API routing", () => {
       ),
     );
 
-    expect(events).toContainEqual({ type: "tool_call", id: "call_1", name: "echo", input: { text: "hi" } });
+    expect(events).toContainEqual({
+      type: "tool_call",
+      id: "call_1",
+      name: "echo",
+      input: { text: "hi" },
+    });
     expect(events[events.length - 1]).toEqual({ type: "stop", reason: "tool_use" });
   });
 });

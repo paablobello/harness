@@ -144,7 +144,10 @@ async function renderEnvBlock(cwd: string): Promise<string> {
   if (isGit) {
     branch = (await safeExec("git", ["-C", cwd, "branch", "--show-current"])).trim();
     const s = await safeExec("git", ["-C", cwd, "status", "--porcelain"]);
-    const lines = s.split("\n").filter((l) => l.trim()).slice(0, 10);
+    const lines = s
+      .split("\n")
+      .filter((l) => l.trim())
+      .slice(0, 10);
     status = lines.length ? lines.join("\n") : "clean";
   }
   return [

@@ -117,10 +117,7 @@ export class PolicyEngine {
     return { decision: "deny", reason: "user declined" };
   }
 
-  private runCommandSegmentDecision(
-    tool: ToolDefinition,
-    input: unknown,
-  ): PolicyDecision | null {
+  private runCommandSegmentDecision(tool: ToolDefinition, input: unknown): PolicyDecision | null {
     if (tool.name !== "run_command") return null;
     if (!input || typeof input !== "object") return null;
     const cmd = (input as { command?: unknown }).command;

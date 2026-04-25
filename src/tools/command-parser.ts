@@ -91,10 +91,7 @@ export function parseCommand(command: string): ParsedCommand {
   let hasPipe = false;
   let parseError = false;
 
-  type Token =
-    | { kind: "word"; text: string }
-    | { kind: "op"; op: string }
-    | { kind: "redirect" };
+  type Token = { kind: "word"; text: string } | { kind: "op"; op: string } | { kind: "redirect" };
 
   const tokens: Token[] = [];
   for (const entry of entries) {

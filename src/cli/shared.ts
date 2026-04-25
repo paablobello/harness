@@ -145,9 +145,7 @@ export function terminalAskPlan(rl: readline.Interface): AskPlan {
     if (allowedTools && allowedTools.length > 0) {
       console.log(pc.dim(`\n  requested allowed tools: ${allowedTools.join(", ")}`));
     }
-    const answer = (await rl.question(pc.magenta("\n  approve plan? [y/N] ")))
-      .trim()
-      .toLowerCase();
+    const answer = (await rl.question(pc.magenta("\n  approve plan? [y/N] "))).trim().toLowerCase();
     if (answer === "y" || answer === "yes") return { approved: true };
 
     const feedback = (await rl.question(pc.magenta("  feedback for revision (optional): "))).trim();

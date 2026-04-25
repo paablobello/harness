@@ -260,7 +260,8 @@ export async function runInkApp(opts: InkBridgeOptions): Promise<RunSummary> {
           level: "error",
           text: `Model error: ${error}`,
         }),
-      onCompactStart: (info) => dispatchRef.current?.({ type: "COMPACT_START", reason: info.reason }),
+      onCompactStart: (info) =>
+        dispatchRef.current?.({ type: "COMPACT_START", reason: info.reason }),
       onCompactEnd: (info) =>
         dispatchRef.current?.({
           type: "COMPACT_END",

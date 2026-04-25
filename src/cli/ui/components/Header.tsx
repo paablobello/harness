@@ -37,7 +37,8 @@ export function Header({ session }: Props): ReactNode {
       <Box>
         <Text color={theme.textDim}>
           {"  "}
-          <Text color={theme.primary}>/help</Text> for commands · Esc to cancel · Ctrl+C twice to exit
+          <Text color={theme.primary}>/help</Text> for commands · Esc to cancel · Ctrl+C twice to
+          exit
         </Text>
       </Box>
     </Box>

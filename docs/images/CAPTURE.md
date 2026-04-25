@@ -9,14 +9,14 @@ below. The README links break otherwise.
 > window. Crop tightly. Optimise with `pngquant *.png --ext .png --force`
 > if file size matters.
 
-| Filename                      | What to capture                                                                                       |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `01-tui-overview.png`         | Hero shot. A live `harness` chat session mid-turn with assistant text streaming and one tool block.   |
-| `02-tool-diff.png`            | An `edit_file` or `apply_patch` tool block expanded, showing the inline unified diff.                 |
-| `03-plan-mode.png`            | Plan mode active (`Shift+Tab`), a few read-only tool calls done, then the `PlanApprovalDialog` open.  |
-| `04-policy-dialog.png`        | A `PolicyDialog` for a sensitive command (e.g. `git push origin main`) showing the y/N/a/d hotkeys.   |
-| `05-inspect-timeline.png`     | Output of `harness inspect latest` showing the timeline + totals.                                     |
-| `06-usage-overlay.png`        | The `/usage` (or `/context`) overlay open in chat, showing token + cost + context-window stats.       |
+| Filename                  | What to capture                                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `01-tui-overview.png`     | Hero shot. A live `harness` chat session mid-turn with assistant text streaming and one tool block.  |
+| `02-tool-diff.png`        | An `edit_file` or `apply_patch` tool block expanded, showing the inline unified diff.                |
+| `03-plan-mode.png`        | Plan mode active (`Shift+Tab`), a few read-only tool calls done, then the `PlanApprovalDialog` open. |
+| `04-policy-dialog.png`    | A `PolicyDialog` for a sensitive command (e.g. `git push origin main`) showing the y/N/a/d hotkeys.  |
+| `05-inspect-timeline.png` | Output of `harness inspect latest` showing the timeline + totals.                                    |
+| `06-usage-overlay.png`    | The `/usage` (or `/context`) overlay open in chat, showing token + cost + context-window stats.      |
 
 ---
 

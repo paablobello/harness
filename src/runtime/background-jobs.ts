@@ -93,11 +93,13 @@ export function adoptBackgroundProcess(opts: AdoptProcessOptions): BackgroundJob
     job.stderr = appendCapped(job.stderr, chunk.toString());
   });
 
-  opts.proc.then((result) => {
-    completeJob(job, result.exitCode ?? null);
-  }).catch(() => {
-    completeJob(job, null);
-  });
+  opts.proc
+    .then((result) => {
+      completeJob(job, result.exitCode ?? null);
+    })
+    .catch(() => {
+      completeJob(job, null);
+    });
 
   return snapshot(job);
 }

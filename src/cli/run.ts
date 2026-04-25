@@ -39,7 +39,6 @@ type RunOptions = {
   sensors?: boolean;
 };
 
-
 export function runCommand(): Command {
   return new Command("run")
     .description("Run a one-shot task non-interactively")

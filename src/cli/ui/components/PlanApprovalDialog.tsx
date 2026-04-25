@@ -36,11 +36,7 @@ const PREVIEW_LINES = 22;
  *   editing → non-interactive while $EDITOR owns the TTY (status line only)
  *   feedback → free-text input · ↵ submit · Esc back to review
  */
-export function PlanApprovalDialog({
-  request,
-  onResolve,
-  onEditorActiveChange,
-}: Props): ReactNode {
+export function PlanApprovalDialog({ request, onResolve, onEditorActiveChange }: Props): ReactNode {
   const theme = useTheme();
   const { isRawModeSupported, setRawMode } = useStdin();
 
@@ -147,7 +143,10 @@ function ReviewStage({
   readonly edited: boolean;
 }): ReactNode {
   const stats = analyzePlan(plan);
-  const { visible, hiddenLines } = clipPlan(plan, expanded ? Number.POSITIVE_INFINITY : PREVIEW_LINES);
+  const { visible, hiddenLines } = clipPlan(
+    plan,
+    expanded ? Number.POSITIVE_INFINITY : PREVIEW_LINES,
+  );
 
   return (
     <Box flexDirection="column" marginY={1}>
@@ -376,7 +375,7 @@ function HotkeyRail({
           <Text color={theme.primary} bold>
             {it.char}
           </Text>
-          <Text color={theme.text}>{" "}{it.label}</Text>
+          <Text color={theme.text}> {it.label}</Text>
         </Box>
       ))}
       {trailing && (

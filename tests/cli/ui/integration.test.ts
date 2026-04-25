@@ -122,7 +122,9 @@ describe("UI state integration with runSession", () => {
 
   it("renders model errors as info instead of requiring the session to exit", async () => {
     const sink = new MemoryEventSink();
-    const adapter = createScriptedAdapter([[{ type: "stop", reason: "error", error: "bad model" }]]);
+    const adapter = createScriptedAdapter([
+      [{ type: "stop", reason: "error", error: "bad model" }],
+    ]);
     let state = initialState(SESSION);
     const dispatch = (action: Action): void => {
       state = reducer(state, action);

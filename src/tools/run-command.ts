@@ -22,7 +22,11 @@ import { touchesProtectedPath } from "../runtime/protected-paths.js";
 import { resolveWithinWorkspace } from "../runtime/workspace.js";
 import type { ToolDefinition } from "../types.js";
 import { parseCommand } from "./command-parser.js";
-import { acquirePersistentShell, detachPersistentShell, type PersistentShell } from "./persistent-shell.js";
+import {
+  acquirePersistentShell,
+  detachPersistentShell,
+  type PersistentShell,
+} from "./persistent-shell.js";
 
 const MAX_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_TIMEOUT_MS = MAX_TIMEOUT_MS;
@@ -44,9 +48,7 @@ const input = z.object({
     .positive()
     .max(MAX_TIMEOUT_MS)
     .optional()
-    .describe(
-      `Total wall-clock cap (ms). Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.`,
-    ),
+    .describe(`Total wall-clock cap (ms). Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.`),
   inactivity_ms: z
     .number()
     .int()
@@ -76,9 +78,7 @@ const input = z.object({
   use_persistent_shell: z
     .boolean()
     .optional()
-    .describe(
-      "Reuse the per-session shell so cwd carries across calls. Default: true.",
-    ),
+    .describe("Reuse the per-session shell so cwd carries across calls. Default: true."),
 });
 
 export const runCommandTool: ToolDefinition<z.infer<typeof input>> = {
@@ -209,16 +209,18 @@ async function runWithPersistentShell(opts: RunFgOpts & { readonly shell: Persis
       kill: () => shell.killChildren(),
     });
     detachPersistentShell(opts.sessionId, shell);
-    runPromise.then((result) => {
-      managed?.complete({
-        exitCode: result.exitCode,
-        killed: result.aborted || result.timedOut,
+    runPromise
+      .then((result) => {
+        managed?.complete({
+          exitCode: result.exitCode,
+          killed: result.aborted || result.timedOut,
+        });
+        void shell.close();
+      })
+      .catch(() => {
+        managed?.complete({ exitCode: null, killed: true });
+        void shell.close();
       });
-      void shell.close();
-    }).catch(() => {
-      managed?.complete({ exitCode: null, killed: true });
-      void shell.close();
-    });
 
     return {
       ok: true,
@@ -228,7 +230,10 @@ async function runWithPersistentShell(opts: RunFgOpts & { readonly shell: Persis
         `Use \`job_output({ id: "${managed.job.id}" })\` to check progress.`,
     };
   } catch (err) {
-    return { ok: false, output: `Command failed to start: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      ok: false,
+      output: `Command failed to start: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 
@@ -283,10 +288,12 @@ async function runTransient(opts: RunFgOpts) {
 
   try {
     const winner = await Promise.race([
-      proc.then((result) => ({ kind: "done" as const, result })).catch((err: unknown) => ({
-        kind: "error" as const,
-        err,
-      })),
+      proc
+        .then((result) => ({ kind: "done" as const, result }))
+        .catch((err: unknown) => ({
+          kind: "error" as const,
+          err,
+        })),
       delay(opts.autoBgAfter).then(() => ({ kind: "background" as const })),
     ]);
 

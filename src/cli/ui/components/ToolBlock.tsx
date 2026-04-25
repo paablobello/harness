@@ -39,7 +39,9 @@ export function ToolBlock({ msg, focused, details, connector = false }: Props): 
         )}
         {msg.status === "ok" || msg.status === "fail"
           ? msg.durationMs !== undefined && (
-              <Text color={theme.textDim}>{"  "}({formatDuration(msg.durationMs)})</Text>
+              <Text color={theme.textDim}>
+                {"  "}({formatDuration(msg.durationMs)})
+              </Text>
             )
           : null}
       </Box>
@@ -56,11 +58,7 @@ export function ToolBlock({ msg, focused, details, connector = false }: Props): 
         <StreamingOutput text={msg.streamingOutput} expanded={expanded} />
       )}
       {hasOutput && (
-        <ToolOutput
-          msg={msg}
-          expanded={expanded}
-          statusColor={colorForStatus(msg.status, theme)}
-        />
+        <ToolOutput msg={msg} expanded={expanded} statusColor={colorForStatus(msg.status, theme)} />
       )}
       {connector && (
         <Box>

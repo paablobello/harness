@@ -569,8 +569,7 @@ describe("PlanApprovalDialog", () => {
       <PlanApprovalDialog
         request={{
           id: "p2",
-          plan:
-            "# Plan\n\n1. Edit `src/a.ts` and `src/b.tsx`\n2. Update tests/a.test.ts\n3. Ship",
+          plan: "# Plan\n\n1. Edit `src/a.ts` and `src/b.tsx`\n2. Update tests/a.test.ts\n3. Ship",
         }}
         onResolve={() => undefined}
       />,
@@ -698,7 +697,11 @@ describe("App — plan mode toggle", () => {
       <App
         session={session}
         history={[]}
-        callbacks={callbacks({ onSetMode: (mode) => { requestedMode = mode; } })}
+        callbacks={callbacks({
+          onSetMode: (mode) => {
+            requestedMode = mode;
+          },
+        })}
         register={() => undefined}
       />,
     );
@@ -719,7 +722,11 @@ describe("App — plan mode toggle", () => {
       <App
         session={session}
         history={[]}
-        callbacks={callbacks({ onSetMode: (mode) => { requestedMode = mode; } })}
+        callbacks={callbacks({
+          onSetMode: (mode) => {
+            requestedMode = mode;
+          },
+        })}
         register={(d) => {
           registered.dispatch = d;
         }}

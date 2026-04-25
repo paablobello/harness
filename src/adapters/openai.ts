@@ -32,10 +32,12 @@ export type OpenAIAdapterOptions = {
 };
 
 export function createOpenAIAdapter(opts: OpenAIAdapterOptions): ModelAdapter {
-  const client = (opts.client as OpenAI | undefined) ?? new OpenAI({
-    apiKey: opts.apiKey,
-    baseURL: opts.baseURL,
-  });
+  const client =
+    (opts.client as OpenAI | undefined) ??
+    new OpenAI({
+      apiKey: opts.apiKey,
+      baseURL: opts.baseURL,
+    });
 
   return {
     name: "openai",
@@ -190,9 +192,7 @@ async function* runWithResponsesApi(
       stream: true,
       // We rebuild the full history each turn — no need for server-side state.
       store: false,
-      ...(input.tools && input.tools.length > 0
-        ? { tools: toResponsesTools(input.tools) }
-        : {}),
+      ...(input.tools && input.tools.length > 0 ? { tools: toResponsesTools(input.tools) } : {}),
       ...(effort ? { reasoning: { effort } } : {}),
       ...(maxTokens !== undefined ? { max_output_tokens: maxTokens } : {}),
     },
@@ -261,7 +261,10 @@ async function* runWithResponsesApi(
           outputTokens = usage.output_tokens ?? 0;
         }
         const status = event.response?.status;
-        if (status === "incomplete" && event.response?.incomplete_details?.reason === "max_output_tokens") {
+        if (
+          status === "incomplete" &&
+          event.response?.incomplete_details?.reason === "max_output_tokens"
+        ) {
           stopReason = "max_tokens";
         } else if (sawFunctionCall || funcAcc.size > 0 || hadFunctionCall(event.response)) {
           // If the response contains function_calls, the turn is "tool_use".
@@ -272,7 +275,9 @@ async function* runWithResponsesApi(
 
       case "response.failed":
       case "response.error":
-        throw new Error(event.error?.message ?? event.response?.error?.message ?? "response failed");
+        throw new Error(
+          event.error?.message ?? event.response?.error?.message ?? "response failed",
+        );
 
       default:
         // Ignore reasoning_summary deltas, content_part events, refusals, etc.
@@ -408,7 +413,9 @@ function toResponsesTools(tools: readonly ToolSpec[]): ResponsesToolParam[] {
 }
 
 function hadFunctionCall(response: ResponsesStreamEvent["response"]): boolean {
-  return !!response?.output?.some((o: ResponsesOutputItem | null | undefined) => o?.type === "function_call");
+  return !!response?.output?.some(
+    (o: ResponsesOutputItem | null | undefined) => o?.type === "function_call",
+  );
 }
 
 // ───────────────────────────────────────────────────────────────────────────

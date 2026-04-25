@@ -65,7 +65,8 @@ export function PolicyDialog({ request, onResolve, onAlwaysAllow }: Props): Reac
 
   const target = describeTarget(request.tool, request.input);
 
-  if (isEdit) return <DiffFirst request={request} target={target} canAlways={canAlways} theme={theme} />;
+  if (isEdit)
+    return <DiffFirst request={request} target={target} canAlways={canAlways} theme={theme} />;
   if (isRunCmd)
     return (
       <ChoiceList
@@ -106,7 +107,7 @@ function DiffFirst({
         <Text color={theme.primary} bold>
           ?
         </Text>
-        <Text bold>{" "}{request.tool}</Text>
+        <Text bold> {request.tool}</Text>
         {target && (
           <>
             <Text color={theme.textDim}>{" → "}</Text>
@@ -125,12 +126,7 @@ function DiffFirst({
           <Text color={theme.textMuted}>{request.reason}</Text>
         </Box>
       )}
-      <HotkeyRail
-        theme={theme}
-        canAlways={canAlways}
-        allowLabel="apply"
-        denyLabel="deny"
-      />
+      <HotkeyRail theme={theme} canAlways={canAlways} allowLabel="apply" denyLabel="deny" />
     </Box>
   );
 }
@@ -169,7 +165,7 @@ function ChoiceList({
         <Text color={theme.primary} bold>
           ?
         </Text>
-        <Text bold>{" "}{request.tool}</Text>
+        <Text bold> {request.tool}</Text>
         <Text color={theme.textDim}>{" wants to run "}</Text>
         <Text color={theme.accentSoft}>{target || "…"}</Text>
       </Box>
@@ -203,7 +199,7 @@ function ChoiceList({
         })}
       </Box>
       <Box marginTop={1}>
-        <Text color={theme.textDim}>   ↑↓ move · enter confirm · Esc cancel turn</Text>
+        <Text color={theme.textDim}> ↑↓ move · enter confirm · Esc cancel turn</Text>
       </Box>
     </Box>
   );
@@ -229,7 +225,7 @@ function InlineRail({
         <Text color={theme.primary} bold>
           ?
         </Text>
-        <Text bold>{" "}{request.tool}</Text>
+        <Text bold> {request.tool}</Text>
         {target && (
           <>
             <Text color={theme.textDim}>{"  "}</Text>
@@ -294,7 +290,7 @@ function Hotkey({
       <Text color={theme.primary} bold>
         {char}
       </Text>
-      <Text color={theme.text}>{" "}{label}</Text>
+      <Text color={theme.text}> {label}</Text>
     </>
   );
 }
@@ -336,8 +332,14 @@ function extractPatch(input: unknown): string | null {
 }
 
 function synthesizeEditDiff(oldStr: string, newStr: string): string {
-  const minus = oldStr.split("\n").map((l) => `-${l}`).join("\n");
-  const plus = newStr.split("\n").map((l) => `+${l}`).join("\n");
+  const minus = oldStr
+    .split("\n")
+    .map((l) => `-${l}`)
+    .join("\n");
+  const plus = newStr
+    .split("\n")
+    .map((l) => `+${l}`)
+    .join("\n");
   return `${minus}\n${plus}`;
 }
 

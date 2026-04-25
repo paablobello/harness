@@ -26,11 +26,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  */
 export async function openInOs(path: string): Promise<boolean> {
   const cmd =
-    process.platform === "darwin"
-      ? "open"
-      : process.platform === "win32"
-        ? "start"
-        : "xdg-open";
+    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
   try {
     await execa(cmd, [path], { detached: true, stdio: "ignore" });
     return true;

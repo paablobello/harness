@@ -4,11 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  compactMessages,
-  maskOldToolResults,
-  splitTail,
-} from "../../src/runtime/compactor.js";
+import { compactMessages, maskOldToolResults, splitTail } from "../../src/runtime/compactor.js";
 import type { ConversationMessage, ModelAdapter } from "../../src/types.js";
 import { createScriptedAdapter } from "../fixtures/fake-adapter.js";
 
@@ -37,9 +33,17 @@ describe("maskOldToolResults", () => {
 
   it("does not touch tool calls (assistant messages) — only tool results", () => {
     const input: ConversationMessage[] = [
-      { role: "assistant", content: "I'll read a file", toolCalls: [{ id: "1", name: "read", input: { path: "x" } }] },
+      {
+        role: "assistant",
+        content: "I'll read a file",
+        toolCalls: [{ id: "1", name: "read", input: { path: "x" } }],
+      },
       { role: "tool", toolCallId: "1", content: "big output" },
-      { role: "assistant", content: "I'll read another", toolCalls: [{ id: "2", name: "read", input: {} }] },
+      {
+        role: "assistant",
+        content: "I'll read another",
+        toolCalls: [{ id: "2", name: "read", input: {} }],
+      },
       { role: "tool", toolCallId: "2", content: "kept" },
     ];
     const out = maskOldToolResults(input, 1, "/tmp/s.jsonl");

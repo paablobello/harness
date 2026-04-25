@@ -81,7 +81,10 @@ describe("FileEventSink", () => {
     sink.write({ ...common, event: "HistoryCleared", messages_dropped: 4 });
     await sink.close();
 
-    const lines = (await readFile(path, "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+    const lines = (await readFile(path, "utf8"))
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
     expect(lines.map((e) => e.event)).toEqual([
       "ContextWarning",
       "CompactStart",

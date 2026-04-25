@@ -39,11 +39,7 @@ export function StatusBar({ state }: { state: UiState }): ReactNode {
   }
   if (ctx.ratio !== undefined && ctx.zone !== "unknown") {
     const color =
-      ctx.zone === "critical"
-        ? theme.error
-        : ctx.zone === "warn"
-          ? theme.warning
-          : theme.textMuted;
+      ctx.zone === "critical" ? theme.error : ctx.zone === "warn" ? theme.warning : theme.textMuted;
     parts.push(sep(theme.textMuted, 5));
     parts.push(
       <Text key="ctx" color={color}>

@@ -126,7 +126,10 @@ export function validateHarnessConfig(config: HarnessConfig): string[] {
       if (cm["snapshotDir"] !== undefined && typeof cm["snapshotDir"] !== "string") {
         errors.push("contextManagement.snapshotDir must be a string");
       }
-      if (cm["summarizerAdapter"] !== undefined && !hasMethods(cm["summarizerAdapter"], ["runTurn"])) {
+      if (
+        cm["summarizerAdapter"] !== undefined &&
+        !hasMethods(cm["summarizerAdapter"], ["runTurn"])
+      ) {
         errors.push("contextManagement.summarizerAdapter must expose runTurn()");
       }
       if (

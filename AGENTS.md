@@ -57,7 +57,7 @@ Plan mode pulls three levers at once:
      tools are present. Non-reasoning models (`gpt-4o` etc.) stay on
      `chat.completions` with the reasoning param silently dropped. Force a
      specific path with the adapter option `api: "chat" | "responses"
-     | "auto"` (default `"auto"`).
+| "auto"` (default `"auto"`).
    - Override per-mode via `SessionConfig.reasoning.plan` — `null` disables
      it entirely.
 3. **Prompt contract.** `src/runtime/plan-mode-prompts.ts` ships an entry
@@ -74,7 +74,7 @@ Workflow:
 
 1. User toggles plan mode (`Shift+Tab`) or starts the session with
    `--permission-mode plan`. The runtime pushes `{ type: "set_mode", mode:
-   "plan" }` into the `ControlChannel`; `session.drainControls` applies it
+"plan" }` into the `ControlChannel`; `session.drainControls` applies it
    between turns, calls `policy.setMode("plan")`, emits
    `PermissionModeChanged`, and queues `PLAN_ENTRY_REMINDER`.
 2. Model explores with `read_file` / `list_files` / `grep_files`, optionally
@@ -90,7 +90,7 @@ Workflow:
      full plan in-place (no separate overlay).
    - `e` **edit in $EDITOR** → opens `$EDITOR` (falls back to `$VISUAL`, then
      `nano`) on a tmp file seeded with the plan. On save+close, the dialog
-     shows an `✎ edited` marker and approval persists the *edited* text (the
+     shows an `✎ edited` marker and approval persists the _edited_ text (the
      model's original plan is discarded). Same pause/resume trick as
      `InputPrompt`'s Ctrl+E — we drop Ink's raw-mode while the editor owns
      the TTY.

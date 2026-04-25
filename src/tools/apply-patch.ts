@@ -167,9 +167,7 @@ function applyHunk(
   hunk: Hunk,
   offset: number,
   cursor: number,
-):
-  | { ok: true; lines: string[]; delta: number; cursor: number }
-  | { ok: false; error: string } {
+): { ok: true; lines: string[]; delta: number; cursor: number } | { ok: false; error: string } {
   const expected = hunk.lines.filter((l) => l.kind !== "+").map((l) => l.text);
   const replacement = hunk.lines.filter((l) => l.kind !== "-").map((l) => l.text);
 
